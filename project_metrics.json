@@ -1,0 +1,46 @@
+{
+  "overall_completion": 41,
+  "current_phase": 6,
+  "current_phase_name": "execution_retry",
+  "last_updated": "2026-08-16",
+  "phases": {
+    "database": 100,
+    "python": 100,
+    "schema": 100,
+    "sql_generation": 100,
+    "safety": 100,
+    "execution": 70,
+    "agent": 0,
+    "memory": 0,
+    "visualization": 0,
+    "api": 0,
+    "frontend": 0,
+    "evaluation": 0,
+    "observability": 0,
+    "deployment": 0
+  },
+  "metrics": {
+    "questions_tested": 1,
+    "successful_queries": 1,
+    "failed_queries": 1,
+    "sql_accuracy": 100,
+    "answer_accuracy": 100,
+    "average_latency_ms": null,
+    "average_retries": 0
+  },
+  "database_status": {
+    "postgres_version": "18",
+    "database_name": "postgresql_query_ai",
+    "dataset": "Stack Overflow PostgreSQL dump",
+    "target_size_gb": 117,
+    "restore_status": "verified",
+    "restore_started": "2026-08-15T02:33:26"
+  },
+  "readonly_role": {
+    "name": "query_ai_agent",
+    "created": true,
+    "verified_select": true,
+    "verified_write_blocked": true,
+    "statement_timeout": "30s"
+  }
+}
