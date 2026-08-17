@@ -26,9 +26,18 @@ Rules:
 """.strip()
 
 
-def generate_sql(question: str, previous_error: str | None = None) -> str:
+def generate_sql(question: str, previous_error: str | None = None, history: list | None = None) -> str:
     schema_text = render_schema_ddl(get_schema())
-    user_message = f"Schema:\n{schema_text}\n\nQuestion: {question}\n\nSQL:"
+    conversation_context = ""
+    if history:
+        conversation_context = "conversation so far :\n"
+        for turn in history:
+            conversation_context += (
+                f"q: {turn['question']}\n"
+                f"SQL:{turn['sql']}\n"
+                f"(returned {turn['row_count']} rows)\n \n"
+            )
+    user_message = f"Schema:\n{schema_text}\n\n{conversation_context}Question: {question}\n\nSQL:"
 
     if previous_error:
         user_message += (

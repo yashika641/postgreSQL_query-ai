@@ -1,4 +1,5 @@
 import pandas as pd
+from sqlalchemy import text
 from database import engine
 from sql_generator import generate_sql
 from sql_safety import validate_sql, SQLSafetyError
@@ -32,7 +33,7 @@ def run_question(question: str) -> pd.DataFrame:
 
         try:
             with engine.connect() as conn:
-                return pd.read_sql(validated_sql, conn)
+                return pd.read_sql(text(validated_sql), conn)
         except DatabaseError as e:
             previous_error = f"database execution error: {e}"
             continue  # Try again with a new SQL generation
@@ -41,7 +42,7 @@ def run_question(question: str) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    test_question = "How many questions were posted in 2023?"
+    test_question = "top 5 users by reputation who answered questions about python"
     try:
         result_df = run_question(test_question)
         print(result_df)

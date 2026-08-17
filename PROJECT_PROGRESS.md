@@ -2,15 +2,19 @@
 
 ## Overall Progress
 
-Completion: 41%
+Completion: 43%
 
 ## Current Phase
 
-Phase 6 — Execution / Retry (~70%, end-to-end pipeline working) → Phase 7 (Agentic Workflow) next
+Phase 7 — Agentic Workflow (LangGraph, ~30%, first working graph in `agent.py`)
 
 ## Current Task
 
-Phase 6 (Execution / Retry) first end-to-end success: "How many questions were posted in 2023?" → generated, validated, executed, returned 993,601. Full pipeline (NL question → Gemini → safety check → Postgres → DataFrame) is working. Next: broaden test coverage (joins, lookup-code questions) and start thinking about Phase 7 (agent loop / conversation handling).
+Phase 7/8 crossover: `agent.py` now has conversational memory — a `history` field (LangGraph reducer, accumulates across turns instead of overwriting), a `record_history_node` that runs only on the success path, a `SqliteSaver` checkpointer keyed by `thread_id` for per-conversation isolation, and `sql_generator.generate_sql()` now accepts `history` to resolve follow-up references ("now show me the same thing but for 2022"). Deliberately scoped to *just* the memory mechanism — no truncation/summarization for long conversations yet (explicit next step once a real conversation gets long enough to need it). `tests/test_agent.py` (the sanity/latency harness built alongside this) was also updated: each test case now gets its own `thread_id` so unrelated questions don't bleed history into each other.
+
+Both `agent.py` and `tests/test_agent.py` were hand-written by the user from pseudocode and needed real bug fixes before they'd run (see Bugs Fixed) — this is now a recurring, expected part of the workflow, not a one-off. One API-level finding worth keeping in mind for later: `SqliteSaver.from_conn_string()` is a context-manager factory (only yields a usable saver inside `with`), which doesn't work for a module-level `app` that other files import — fixed by constructing `SqliteSaver` directly from a raw `sqlite3.connect(...)` connection instead.
+
+Earlier milestone (now superseded by the above): `agent.py` was first stood up as a faithful LangGraph port of `executor.py`'s retry loop, smoke-tested successfully ("how many questions were posted in 2025?" → 0). The full `test_agent.py` 9-question run that followed hit the Gemini free-tier daily quota (20 requests/day) partway through, so only the `easy` tier reflects real agent behavior from that run — the rest is quota exhaustion, not signal. Deeper review of that run is still deferred, not resolved.
 
 ## Phase Progress
 
@@ -21,7 +25,7 @@ Schema Intelligence      ██████████ 100%
 SQL Generation           ██████████ 100%
 Safety                    ██████████ 100%
 Execution / Retry         ███████░░░ 70%
-Agent                     ░░░░░░░░░░ 0%
+Agent                     ███░░░░░░░ 30%
 Memory                    ░░░░░░░░░░ 0%
 Visualization             ░░░░░░░░░░ 0%
 API                       ░░░░░░░░░░ 0%
@@ -48,20 +52,56 @@ Deployment                ░░░░░░░░░░ 0%
 - First full pipeline success: "How many questions were posted in 2023?" → 993,601 (NL question → Gemini → safety validation → Postgres → DataFrame, end to end)
 - GitHub repo scaffold in place (`postgreSQL_query-ai`): README, LICENSE, `.gitignore`, remote `origin` set to `github.com/yashika641/postgreSQL_query-ai`
 - Project mentoring framework agreed (this file + `project_metrics.json` + `docs/DASHBOARD.md`)
+- Phase 7 framework decision: LangGraph, over Google ADK / plain custom loop / CrewAI
+- `agent.py`: first working LangGraph `StateGraph` port of `executor.py`'s retry loop (`generate` → `validate` → `execute` nodes, conditional edges back to `generate` on error), smoke-tested successfully end-to-end
+- `tests/test_agent.py`: sanity/latency test harness — runs a difficulty-tiered question set through `app.invoke()` directly (not `run_question()`, to get full state incl. `attempts`), times each with `time.perf_counter()`, saves results to a timestamped CSV
+- `agent.py` + `sql_generator.py`: conversational memory — `history` reducer field, `record_history_node`, `SqliteSaver` checkpointer keyed by `thread_id`, `generate_sql()` now prompt-injects prior turns
+- GitHub Actions QC discussed and deliberately deferred to Phase 14 (see Deferred section) — CI runners can't reach the local 117GB DB
 
 ## In Progress
 
-- Phase 6 (Execution / Retry): core pipeline works; broadening test coverage before calling the phase done.
+- Phase 7/8 (Agentic Workflow + Memory): core mechanism is in and smoke-tests import cleanly; not yet run against real questions to confirm follow-ups actually resolve correctly (blocked short-term by Gemini free-tier quota exhaustion from the last full test run).
 
 ## Next
 
-1. Test `run_question()` against harder questions: multi-table joins (e.g. "top 5 users by reputation who answered questions about python"), `votetypeid`/`linktypeid` lookup questions, and intentionally ambiguous ones — check both correctness and that the retry loop behaves sensibly on genuine failures.
-2. Consider enforcing a default `LIMIT` in `sql_safety.py` (or a dedicated step) for queries without one, so a broad question against `posts` can't pull an enormous result set into memory.
-3. Start Phase 7 (Agentic Workflow) once Phase 6 feels solid: wrap `run_question()` in a loop that can hold a conversation (follow-up questions referring to prior results) rather than always starting fresh.
+1. Run `agent.py`'s smoke test (two questions, same `thread_id`: "...2023?" then "now show me the same thing but for 2022") once Gemini quota resets, to confirm the second question actually resolves "the same thing" via history rather than failing or hallucinating an unrelated query.
+2. Re-run `tests/test_agent.py`'s full 9-question suite cleanly (previous run hit the 20-req/day free-tier quota partway through) — review real success/failure/latency per difficulty tier this time.
+3. Decide: simple truncation (`history[-N:]`) vs. rolling summarization node for keeping long conversations within a reasonable prompt size — deliberately not built yet, this is the explicit next design increment for memory.
+4. Decide how to handle genuinely heavy analytical queries like the python-join test (deferred, not blocking): raising `statement_timeout` for this query class, `CLUSTER posts` on the trigram index (one-time, static dataset) to co-locate same-tag rows, or a normalized tag lookup table (unnest `tags` — the "correct" fix for substring tag search at scale).
+5. Consider enforcing a default `LIMIT` in `sql_safety.py` (or a dedicated step) for queries without one, so a broad question against `posts` can't pull an enormous result set into memory.
+6. Looking ahead (not started): Phase 10 (FastAPI backend) to expose `run_question()`/`thread_id` over HTTP, then Phase 11 (frontend chat widget) — needs Phase 10 first, since a widget needs something to call.
 
 ## Blockers
 
 - (none currently — DB verification and read-only access are both resolved)
+
+## Deferred (revisit at Phase 14 — Deployment)
+
+- GitHub Actions QC for `tests/test_agent.py`: blocked by the fact that CI runners can't reach the local 117GB Postgres DB. Discussed three options (small seeded Postgres service container in CI / self-hosted runner / no-DB lightweight checks only) — leaning toward the seeded-container approach since it would have caught most of today's bugs, but explicitly deferred until closer to deployment rather than decided now.
+
+## Bugs Fixed (Phase 8 — conversational memory)
+
+- `sql_generator.py`: `generate_sql()`'s signature wasn't updated to accept `history` even though the function body referenced it (`if history:`) — guaranteed `NameError` on every call. Also `conversation_context` was built but never actually inserted into `user_message`, so even once fixed it wouldn't have reached the model. Both fixed.
+- `agent.py` line `history:state.get("history",[])` used `:` instead of `=` for a keyword argument — `SyntaxError`.
+- `agent.py`'s `record_history_node(state=AgentState)` used `=` (making the `AgentState` class itself a default value) instead of `:` (type annotation) — should be `state: AgentState`.
+- `agent.py` had `builder.add_conditional_edges("execute", ...)` called twice — once with the old two-way mapping (pre-memory), once with the new three-way mapping including `record_history`. LangGraph doesn't support redefining a node's conditional edges; removed the stale first call.
+- `agent.py`: stray extra `)` on `app = builder.compile(checkpointer=checkpointer))` — `SyntaxError`.
+- `agent.py`: `SqliteSaver.from_conn_string("agent_memory.sqlite")` returns a context-manager generator, only yielding a usable `SqliteSaver` inside a `with` block — assigning it directly gave `builder.compile()` a context manager instead of a checkpointer. Since `app` needs to stay alive at module scope for other files (`tests/test_agent.py`) to import, switched to constructing `SqliteSaver` directly from a raw connection: `SqliteSaver(sqlite3.connect("agent_memory.sqlite", check_same_thread=False))`.
+- `agent.py`'s smoke test called `run_question(test_question)` with `thread_id` now a required parameter — missing-argument `TypeError`. Fixed, and upgraded to two sequential calls on the same `thread_id` so the smoke test actually demonstrates memory working, not just that the function runs.
+- `tests/test_agent.py`: `app.invoke()` was called with no `config`/`thread_id` at all — confirmed via direct test that a checkpointed graph raises `ValueError: Checkpointer requires one or more of the following 'configurable' keys: thread_id, ...` without one. Fixed by giving each test case its own `thread_id` (`eval-{i}-{difficulty}`) so unrelated test questions don't bleed history into each other.
+
+## Bugs Fixed (Phase 7 — `agent.py`)
+
+- File was originally named `langgraph.py`, which shadowed the real installed `langgraph` package on `from langgraph import ...` (same directory wins over site-packages) — caused `ImportError: cannot import name 'State' from 'langgraph'` pointing at itself, confirmed by the actual traceback the user hit. Fixed by renaming to `agent.py`.
+- `langgraph` was never in `requirements.txt` / installed in the venv — would have been the next failure even after the rename. Installed `langgraph` (1.2.11) into `query/`.
+- `from langgraph import State` and `from click import group` were unused/incorrect imports (no `State` export exists on `langgraph`; `click.group` unrelated, likely autocomplete noise) — removed.
+- `Stategraph` (wrong capitalization/casing of `StateGraph`) — fixed.
+- `pandas` was never imported (only `from pandas.errors import DatabaseError`) despite calling `pd.read_sql()` — `NameError`. Added `import pandas as pd`.
+- `DataFrame` used as a type hint in two places but never imported — `NameError` at file-load time (return-type annotations evaluate eagerly without `from __future__ import annotations`). Added `from pandas import DataFrame`.
+- State schema declared the field `validate_sql` (shadowing the imported `validate_sql` function name) while `validate_node` actually wrote `validated_sql` and `initial_state` also used `validated_sql` — `execute_node` read the never-set key `state["validate_sql"]`, guaranteed `KeyError` on any successful validation. Unified everything to `validated_sql`.
+- `execute` node was registered as `"Execute"` (capital E) but `add_conditional_edges("execute", ...)` and the edge-mapping dicts referenced lowercase `"execute"` — node-not-found error at compile/invoke. Unified to lowercase `"execute"` throughout, matching `"generate"`/`"validate"`.
+- Conditional-edge mapping dicts used the string `'END'` as both key and value, but the router functions return the actual `END` sentinel object imported from `langgraph.graph` — a string never matches the sentinel by `==`. Fixed to use the real `END` object as the dict key/value.
+- `run_question`'s final error message used single-quoted f-string with a single-quoted key access nested inside (`f'...{final_state['error']}'`) — a `SyntaxError` pre-3.12. Fixed by switching the outer quotes to double.
 
 ## Bugs Fixed
 
@@ -71,6 +111,8 @@ Deployment                ░░░░░░░░░░ 0%
 - `executor.py` caught `sqlalchemy.exc.DBAPIError` around `pd.read_sql()`, but pandas wraps SQLAlchemy exceptions into `pandas.errors.DatabaseError` before they propagate — `DBAPIError` never matched, so DB errors crashed the script instead of triggering a retry. Fixed to catch `pandas.errors.DatabaseError`.
 - `sql_safety.py`'s `validate_sql()` was annotated `-> None` but actually returns the validated SQL string — caused a downstream type-checker false positive in `executor.py` (`pd.read_sql` flagged as possibly receiving `None`). Fixed the annotation to `-> str`.
 - First real end-to-end query hit the read-only role's 30s `statement_timeout` — not a code bug, but exposed that `posts` had no index on `creationdate`. Fixed with `sql/add_indexes.sql` (see Completed).
+- `executor.py`'s `pd.read_sql(validated_sql, conn)` raised `TypeError: sqlalchemy.cyextension.immutabledict.immutabledict is not a sequence` on every query. Root cause: passing a raw SQL string (not a `text()` object) into `pd.read_sql` with a SQLAlchemy `Connection` routes through `exec_driver_sql`, which hands psycopg2 an empty `immutabledict` as query params instead of `None` — psycopg2 then tries to `%`-substitute against the SQL text and chokes on the literal `%` characters in `LIKE` patterns. Fixed by wrapping the SQL in `sqlalchemy.text()` before passing it to `pd.read_sql`, which routes through `connection.execute()` instead.
+- Testing a join question ("top 5 users by reputation who answered questions about python") hit the 30s `statement_timeout` again after the above fix — `EXPLAIN` showed the planner doing a parallel scan of all ~18M `posttypeid=1` rows and checking `tags LIKE '%<python>%'` row-by-row, since none of the existing btree indexes on `tags` support a leading-wildcard pattern. Added a `pg_trgm` GIN index (`posts_tags_trgm_idx`) to `sql/add_indexes.sql` and applied it (confirmed `indisvalid = t`). **Did not fix the timeout** — re-running the join test still times out. `EXPLAIN` (with `enable_hashjoin`/`enable_seqscan` toggled off to compare plans) shows the trigram index is being used correctly, but fetching the ~380K matching rows itself costs ~3.15M planner cost units via bitmap heap scan because tag matches are scattered across all 59.5M rows with no physical clustering — not a missing-index problem, a genuinely expensive query at this scale. See Current Task / Next for options under consideration.
 
 ## Technical Decisions
 
@@ -84,11 +126,11 @@ Deployment                ░░░░░░░░░░ 0%
 
 ## AI Evaluation
 
-Questions tested: 1
-SQL success rate: 100% (1/1, after the index fix — first attempt failed on timeout, second attempt after the fix succeeded)
-Answer accuracy: 1/1 correct (993,601 questions in 2023 — matches expected posttypeid/date logic)
+Questions tested: 2
+SQL success rate: 50% (1/2) — "questions posted in 2023?" succeeded (993,601, matches expected logic); "top 5 users by reputation who answered questions about python" generated correct-looking SQL each of 3 retry attempts but timed out at 30s on all three (genuine query cost, not a generation error)
+Answer accuracy: 1/1 on completed queries (the timeout case never produced an answer to check)
 Average latency: not yet measured
-Average retries: not yet meaningful at n=1
+Average retries: 3/3 (max) on the timeout case, 0 on the first success
 
 ## Architecture Changes
 

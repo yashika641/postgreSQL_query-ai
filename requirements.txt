@@ -17,7 +17,8 @@ sqlparse>=0.5.0
 tenacity>=8.3.0
 
 # --- Agent / Memory ---
-# conversation memory uses stdlib sqlite3 — no extra package needed
+langgraph>=1.2.11
+langgraph-checkpoint-sqlite>=3.1.1
 
 # --- Visualization ---
 pandas>=2.2.0

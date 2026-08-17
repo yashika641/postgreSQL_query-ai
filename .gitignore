@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project-specific: local runtime artifacts, not source
+agent_memory.sqlite
+agent_memory.sqlite-journal
+agent_memory.sqlite-wal
+agent_memory.sqlite-shm
+eval_results_*.csv
