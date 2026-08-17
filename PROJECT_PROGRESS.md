@@ -25,8 +25,8 @@ Schema Intelligence      ██████████ 100%
 SQL Generation           ██████████ 100%
 Safety                    ██████████ 100%
 Execution / Retry         ███████░░░ 70%
-Agent                     ███░░░░░░░ 30%
-Memory                    ░░░░░░░░░░ 0%
+Agent                     █████░░░░░ 50%
+Memory                    ██░░░░░░░░ 20%
 Visualization             ░░░░░░░░░░ 0%
 API                       ░░░░░░░░░░ 0%
 Frontend                  ░░░░░░░░░░ 0%
