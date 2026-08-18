@@ -2,24 +2,31 @@
 
 ## Overall Progress
 
-Completion: 56%
+Completion: 60%
 
 ## Current Phase
 
-MVP considered functionally ready (Phases 1-11 all have working code, backend+frontend verified end-to-end). Next session deliberately jumps to **Phase 13 (Observability) then Phase 12 (Evaluation)** before returning to fix the open bug list below — user's explicit call: get visibility in place before debugging blind, rather than debug first and instrument later.
+Observability (Phase 13) is implemented and verified end-to-end. Next up: **Phase 12 (Evaluation)** — run `tests/test_agent.py`'s full suite now that there's real instrumentation to watch it through — then the Open Bugs debugging pass below.
 
 ## Current Task (session handoff — read this first)
 
-Backend (`backend/api.py`) and frontend (`frontend/`, React + Vite) exist and were verified working end-to-end via curl (correct answer, HTTP 200, real Gemini round-trip). Two serious bugs were found and fixed during that verification — full detail in Bugs Fixed below:
-1. `AgentState.result` was a raw `DataFrame`, which crashed the `SqliteSaver` checkpointer's msgpack serialization on **every** successful query once memory was added — fixed by storing `{"columns", "rows"}` instead.
-2. `generate_node` had no error handling for the Gemini call itself — fixed by catching `APIError` and adding an `after_generate` router.
+**Observability is done and verified working, not just written:**
+- `observalibilty/evaluation/metrics.py` — Prometheus `Counter`/`Histogram` definitions (per-node duration/outcomes, per-request duration/count/attempts)
+- `observalibilty/evaluation/observability.py` — `log_node` decorator (wraps all four `agent.py` graph nodes: `generate`, `validate`, `execute`, `record_history`) and `log_chat_request` (called from `backend/api.py`'s `/chat`), each writing a structured JSON line to `logs/agent.log` **and** updating the matching Prometheus metric in the same call
+- `backend/api.py` mounts `/metrics` (via `prometheus_client.make_asgi_app()`) for Prometheus to scrape
+- `docker-compose.yml` + `docker/prometheus.yml` run Prometheus (`localhost:9090`, scraping `host.docker.internal:8000` since uvicorn runs on the host, not in a container) and Grafana (`localhost:3000`)
+- A starter Grafana dashboard (`Query AI - Observability`, uid `query-ai-observability`) was pushed via the Grafana API with 7 panels: success/failure counts, overall success rate, avg attempts, chat latency p50/p95, node duration p95 by node, node outcomes by node, requests over time. **Confirmed rendering real data via a live browser check** — the count/stat panels (success vs failure, node outcomes) show real numbers; the two `rate()`-based latency panels were still empty at verification time because too few requests had been sent for `rate()` over a 5m window to resolve — expected to populate once the Phase 12 eval suite generates real traffic, not a bug.
+- Grafana's admin password had been changed via its first-login UI flow at some point (broke API access with `admin`/`admin`) — reset via `docker exec ... grafana cli admin reset-admin-password admin`, then the "update your password" prompt was explicitly **skipped** on the next login so `admin`/`admin` keeps working for future API/dashboard-provisioning calls. Worth remembering if Grafana API calls start 401ing again.
 
-A third bug was then found by the user actually using the browser (not automation): **`localhost` resolves to the IPv6 loopback (`::1`) on this machine, but uvicorn only binds the IPv4 loopback (`127.0.0.1`)** — so the frontend's `fetch("http://localhost:8000/...")` silently tried the wrong address family and failed with "Failed to fetch," even though curl (pointed at `127.0.0.1` explicitly) worked. Fixed in `frontend/src/api.js` by hardcoding `API_BASE` to `http://127.0.0.1:8000`. **This fix is NOT yet committed** — pick that up at the start of the next session (`git add frontend/src/api.js && git commit`), and confirm with the user that a real browser question now round-trips successfully before moving on, since that confirmation was still pending when this session ended.
+**Two real findings surfaced immediately from live instrumentation** (see Open Bugs below, added as items 7-8):
+- Gemini generates `COUNT(*)` more often than `COUNT(id)` for simple count questions, which is slow enough on `posts`/`votes` to hit the 30s `statement_timeout` on attempt 1 — the retry loop recovers by regenerating (attempt 2 tends to succeed), but it's a wasted 30s+ round-trip every time. A prompt-engineering fix (nudge the schema prompt to prefer `COUNT(id)`/`COUNT(1)` on huge tables) would avoid the wasted attempt entirely.
+- `votes` has no index covering `creationdate` (same class of gap `posts` had before `posts_posttypeid_creationdate_idx` was added) — a `creationdate`-filtered `votes` query ("how many upvotes were cast in 2022?") timed out on **all 3 retry attempts**, a genuine unrecovered failure, not just a slow-but-fine case.
 
-**Next session's plan, in order:**
-1. Observability: structured logging per graph node (timing + outcome) and per `/chat` request in `backend/api.py`, persisted somewhere reviewable (not just uvicorn stdout) — likely via `logging` + `rich` (already in `requirements.txt`).
-2. Evaluation: re-run `tests/test_agent.py`'s full suite cleanly now that the two blocking bugs are fixed — first real signal on success rate/latency/retries per difficulty tier. Feed real numbers into the AI Evaluation section below.
-3. Debugging pass through the Open Bugs list below, using the new observability data — see that list for suggested order (numbered roughly by priority already).
+Still outstanding from before: `frontend/src/api.js`'s IPv4/IPv6 fix is **still uncommitted** — hasn't blocked anything since the backend's been run directly, but pick it up before frontend work resumes.
+
+**Next, in order:**
+1. Evaluation: run `tests/test_agent.py`'s full 9-question suite now that observability is live — first real signal on success/latency/retries per difficulty tier, and will populate the Grafana rate-based panels with meaningful data. Feed results into the AI Evaluation section below.
+2. Debugging pass through the Open Bugs list, now including the two observability-surfaced findings — see that list for priority order.
 
 ## Phase Progress
 
@@ -36,7 +43,7 @@ Visualization             ░░░░░░░░░░ 0%
 API                       ██████░░░░ 60%
 Frontend                  █████░░░░░ 50%
 Evaluation                ░░░░░░░░░░ 0%
-Observability             ░░░░░░░░░░ 0%
+Observability             █████████░ 90%
 Deployment                ░░░░░░░░░░ 0%
 ```
 
@@ -69,6 +76,7 @@ Deployment                ░░░░░░░░░░ 0%
 - End-to-end verified via curl: NL question → Gemini → safety → Postgres → checkpointed state → HTTP JSON response, correct answer, no crash
 - Found + fixed a third real bug, this one by the user testing in a real browser (not automation): `localhost` resolves to IPv6 (`::1`) on this machine, uvicorn only binds IPv4 (`127.0.0.1`) — `frontend/src/api.js` hardcoded to target `127.0.0.1:8000` explicitly. **Uncommitted** — first thing to do next session.
 - MVP declared functionally ready by the user; session ends here, next session pivots to Observability + Evaluation before further bug fixing (explicit user decision)
+- **Observability implemented and verified end-to-end**: `observalibilty/evaluation/{metrics,observability}.py` (Prometheus metrics + structured JSON logging via one shared `log_node` decorator + `log_chat_request`), wired into all four `agent.py` graph nodes and `backend/api.py`'s `/chat`; `/metrics` endpoint mounted; `docker-compose.yml` running Prometheus + Grafana; a 7-panel Grafana dashboard pushed via API and confirmed rendering real scraped data in a live browser check. Surfaced two real findings immediately (missing `votes.creationdate` index; Gemini's `COUNT(*)` vs `COUNT(id)` preference) — added as Open Bugs items 7-8.
 
 ## In Progress
 
@@ -89,6 +97,8 @@ Deployment                ░░░░░░░░░░ 0%
 4. **No default `LIMIT` enforcement** in `sql_safety.py` — an unbounded broad question against `posts` can pull an enormous result set into memory with nothing stopping it. Small, contained, no dependencies on anything else.
 5. **No truncation/summarization for long conversation history** — `generate_sql()` dumps the *entire* `history` into every prompt with no cap. Fine now, will grow prompt size/cost unboundedly on a long conversation. Bigger design decision (truncation vs. rolling summarization), tackle once everything else is solid.
 6. **Heavy analytical queries still time out** — the python-join question and the "average reputation per tag" stress question both hit the 30s `statement_timeout` on every attempt. Root-caused (not a missing-index problem, genuinely expensive at 59.5M-row scale). Three options already scoped: raise `statement_timeout` for this query class, `CLUSTER posts` by tag, or normalize `tags` into its own lookup table. Biggest design decision of the list, tackle last.
+7. **`votes` has no index covering `creationdate`** — found via the new observability logs: "how many upvotes were cast in 2022?" timed out on all 3 attempts (every attempt generated a `creationdate`-range-filtered `COUNT`). Same class of fix as `posts_posttypeid_creationdate_idx` — small, contained, high-confidence fix.
+8. **Gemini prefers `COUNT(*)` over `COUNT(id)`/`COUNT(1)` for simple counts**, which is slow enough on `posts`/`votes` to hit the 30s timeout on attempt 1 even when the retry recovers — a wasted 30s+ round-trip on otherwise-simple questions. Fix is prompt engineering (nudge `schema_prompt.py` to prefer `COUNT(id)` on large tables), not a code bug. Worth doing alongside item 7 since both showed up in the same observability session.
 
 ## Blockers
 

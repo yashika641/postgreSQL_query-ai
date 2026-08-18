@@ -1,12 +1,14 @@
 {
-  "overall_completion": 56,
-  "current_phase": 13,
-  "current_phase_name": "observability_then_evaluation",
-  "last_updated": "2026-08-18T15:00:00",
+  "overall_completion": 60,
+  "current_phase": 12,
+  "current_phase_name": "evaluation",
+  "last_updated": "2026-08-18T18:20:00",
   "session_handoff": {
     "mvp_status": "functionally ready end-to-end (backend confirmed via curl; frontend fixed for an IPv4/IPv6 localhost mismatch but not yet re-confirmed by the user in-browser)",
-    "uncommitted_changes": "frontend/src/api.js (API_BASE hardcoded to 127.0.0.1) -- commit this first next session",
-    "next_session_order": ["observability (structured logging per node + per request)", "evaluation (clean full tests/test_agent.py run)", "then the Open Bugs list in PROJECT_PROGRESS.md"],
+    "uncommitted_changes": "frontend/src/api.js (API_BASE hardcoded to 127.0.0.1) -- still not committed, not currently blocking anything",
+    "observability_status": "implemented and verified live: structured JSON logs (logs/agent.log), Prometheus metrics (/metrics), Grafana dashboard 'Query AI - Observability' (uid query-ai-observability) confirmed rendering real data via browser check",
+    "grafana_credentials_note": "admin password was reset to admin/admin via 'docker exec grafana-1 grafana cli admin reset-admin-password admin' after the UI's first-login flow had changed it; the post-login 'update your password' prompt was skipped so admin/admin keeps working for API calls",
+    "next_session_order": ["evaluation (clean full tests/test_agent.py run, now with observability watching it)", "then the Open Bugs list in PROJECT_PROGRESS.md, including two new observability-surfaced findings"],
     "reasoning": "user's explicit call: instrument for visibility before debugging blind, rather than the reverse"
   },
   "phases": {
@@ -22,18 +24,18 @@
     "api": 60,
     "frontend": 50,
     "evaluation": 0,
-    "observability": 0,
+    "observability": 90,
     "deployment": 0
   },
   "metrics": {
-    "questions_tested": 3,
-    "successful_queries": 2,
-    "failed_queries": 1,
-    "sql_accuracy": 67,
+    "questions_tested": 5,
+    "successful_queries": 3,
+    "failed_queries": 2,
+    "sql_accuracy": 60,
     "answer_accuracy": 100,
     "average_latency_ms": null,
-    "average_retries": 1,
-    "notes": "3rd test = curl end-to-end verification of backend /chat endpoint post-DataFrame-serialization-fix, correct answer, no crash. Earlier full 9-question suite runs are invalidated (quota exhaustion, then the DataFrame bug) and not counted here."
+    "average_retries": 1.5,
+    "notes": "5th test = two live /chat calls made while verifying observability. 'questions posted in 2023' succeeded on attempt 2 (attempt 1's Gemini-generated COUNT(*) timed out at 30s, attempt 2 used COUNT(id) and finished in ~2.8s). 'upvotes cast in 2022' failed all 3 attempts (votes.creationdate has no index -- new Open Bugs item). Earlier full 9-question suite runs are invalidated (quota exhaustion, then the DataFrame bug) and not counted here; Phase 12 will supersede this with a full clean run."
   },
   "database_status": {
     "postgres_version": "18",

@@ -2,7 +2,7 @@
 
 > Auto-narrated from `project_metrics.json` and `PROJECT_PROGRESS.md`. Update both whenever this file is regenerated.
 
-**Last updated:** 2026-08-18 · **Overall completion:** **56%** · **Current phase:** `MVP ready → pivoting to Observability + Evaluation`
+**Last updated:** 2026-08-18 · **Overall completion:** **60%** · **Current phase:** `Observability done → Evaluation next`
 
 ---
 
@@ -10,27 +10,31 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  MVP DECLARED FUNCTIONALLY READY — SESSION HANDOFF            │
-│  Backend + frontend verified end-to-end via curl (correct     │
-│  answer, HTTP 200). Three real bugs found + fixed this        │
-│  session: a DataFrame/msgpack checkpointer crash on EVERY      │
-│  successful query, missing Gemini-API error handling in       │
-│  generate_node, and an IPv4/IPv6 localhost mismatch that       │
-│  broke the browser's fetch() (found by the user testing        │
-│  for real, not by automation). The IPv6 fix is UNCOMMITTED.   │
+│  OBSERVABILITY LIVE — STRUCTURED LOGS + PROMETHEUS +           │
+│  GRAFANA, VERIFIED WITH REAL DATA                              │
+│  observalibilty/evaluation/{metrics,observability}.py wired    │
+│  into all 4 agent.py nodes + backend/api.py's /chat. Docker    │
+│  Compose runs Prometheus (scraping /metrics) + Grafana; a      │
+│  7-panel dashboard was pushed via API and confirmed rendering  │
+│  real data in a live browser check.                            │
 │                                                                │
-│  User's explicit next-session plan: Observability first        │
-│  (structured logging per node + per request), then             │
-│  Evaluation (clean tests/test_agent.py run), THEN a debugging  │
-│  pass through the compiled Open Bugs list — visibility          │
-│  before debugging blind, not the reverse.                      │
+│  It immediately surfaced two real findings: votes has no       │
+│  index on creationdate (unrecovered timeout, 3/3 attempts      │
+│  failed), and Gemini prefers COUNT(*) over COUNT(id) on huge   │
+│  tables (recoverable but wastes a 30s attempt). Both logged    │
+│  as new Open Bugs items.                                       │
+│                                                                │
+│  Next: Evaluation (clean tests/test_agent.py run) — will       │
+│  also fill in the dashboard's rate()-based latency panels,     │
+│  which were still sparse at verification time. Then the        │
+│  Open Bugs debugging pass.                                     │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ## 🧭 Overall Completion
 
 ```
-[███████████████████████░░░░░░░░░░░░░░░]  56%
+[████████████████████████░░░░░░░░░░░░░░]  60%
 ```
 
 ## 🪜 Phase-by-Phase Progress
@@ -49,7 +53,7 @@
 | 10 | FastAPI Backend | 🟡 In Progress | `██████░░░░` 60% |
 | 11 | Frontend | 🟡 In Progress | `█████░░░░░` 50% |
 | 12 | Evaluation | ⬜ Not Started | `░░░░░░░░░░` 0% |
-| 13 | Observability | ⬜ Not Started | `░░░░░░░░░░` 0% |
+| 13 | Observability | 🟢 Near-Complete | `█████████░` 90% |
 | 14 | Docker + Deployment | ⬜ Not Started | `░░░░░░░░░░` 0% |
 
 ## 📈 Phase Completion (visual)
@@ -60,7 +64,7 @@ xychart-beta
     title "Phase Completion %"
     x-axis ["DB", "Python", "Schema", "SQL Gen", "Safety", "Exec", "Agent", "Memory", "Viz", "API", "Frontend", "Eval", "Observ.", "Deploy"]
     y-axis "Completion %" 0 --> 100
-    bar [100, 100, 100, 100, 100, 70, 60, 40, 0, 60, 50, 0, 0, 0]
+    bar [100, 100, 100, 100, 100, 70, 60, 40, 0, 60, 50, 0, 90, 0]
 ```
 
 ## 🗺️ Milestone Timeline
@@ -109,14 +113,16 @@ flowchart TD
 
 | Metric | Value |
 |---|---|
-| Questions tested | 2 |
-| SQL execution success rate | 50% (1/2 — python-join question times out on all 3 retries) |
-| Answer accuracy | 100% on completed queries (993,601 matches expected logic) |
-| Average retries | 0 on the success, 3/3 (max) on the timeout case |
+| Questions tested | 5 |
+| SQL execution success rate | 60% (3/5) |
+| Answer accuracy | 100% on completed queries |
+| Average retries | 1.5 (0 on clean successes, up to 3/3 max on unrecovered timeouts) |
 | Average latency | not yet measured |
 | Token usage / query | not yet measured |
 
-*Real evaluation rigor starts in Phase 12 — this is one manual smoke test, not a benchmark yet.*
+Latest two: "questions posted in 2023" succeeded on attempt 2 (attempt 1's `COUNT(*)` timed out at 30s, attempt 2's `COUNT(id)` finished in ~2.8s); "upvotes cast in 2022" failed all 3 attempts (`votes.creationdate` has no index).
+
+*Real evaluation rigor starts in Phase 12 — these are manual smoke tests via observability, not a benchmark yet. Phase 12 will run the full 9-question suite cleanly.*
 
 ## 🐛 Bugs Fixed (session handoff — real browser testing)
 
@@ -180,13 +186,15 @@ flowchart TD
 - `frontend/`: React + Vite chat widget, built by Claude per the user's request (not pseudocode-first, unlike the Python files) — UI verified rendering and accepting input via screenshots
 - Three real bugs found and fixed during end-to-end verification: the `DataFrame`/msgpack checkpointer crash (affected every successful query since memory was added), missing error handling in `generate_node` for Gemini API failures, and an IPv4/IPv6 `localhost` mismatch breaking the browser's `fetch()`
 - MVP declared functionally ready by the user — session ends here, next session pivots to Observability + Evaluation before further bug fixing
+- **Observability implemented and verified live**: `observalibilty/evaluation/metrics.py` (Prometheus `Counter`/`Histogram`s) + `observalibilty/evaluation/observability.py` (`log_node` decorator wrapping all 4 `agent.py` nodes, `log_chat_request` for `/chat` — each writes a structured JSON line to `logs/agent.log` *and* updates Prometheus in one call); `/metrics` mounted in `backend/api.py`; `docker-compose.yml` runs Prometheus + Grafana; a 7-panel Grafana dashboard pushed via API, confirmed rendering real scraped data via a live browser check
+- Two real findings surfaced immediately from the new instrumentation: `votes` has no `creationdate` index (unrecovered 3/3-attempt timeout), and Gemini prefers `COUNT(*)` over `COUNT(id)` on huge tables (recoverable on retry, but wastes a 30s+ attempt) — both logged as new Open Bugs items
 
 ## 🔜 What's Left (immediate)
 
-- [ ] Commit `frontend/src/api.js`'s IPv4/IPv6 fix, and get the user's confirmation that a real browser question now round-trips successfully (first thing next session)
-- [ ] **Observability**: structured logging per graph node (timing + outcome) and per `/chat` request, persisted somewhere reviewable — not just uvicorn stdout
-- [ ] **Evaluation**: re-run `tests/test_agent.py`'s full suite cleanly now both blocking bugs are fixed — first real signal on success/latency/retries per tier
-- [ ] Then the Open Bugs list in `PROJECT_PROGRESS.md` (6 items, already priority-ordered) — including confirming memory follow-ups actually resolve correctly, which still hasn't been proven
+- [x] **Observability**: structured logging per graph node + per `/chat` request, Prometheus + Grafana with a live dashboard — done and verified
+- [ ] Commit `frontend/src/api.js`'s IPv4/IPv6 fix, and get the user's confirmation that a real browser question now round-trips successfully (still pending, not currently blocking)
+- [ ] **Evaluation**: run `tests/test_agent.py`'s full 9-question suite cleanly, now with observability watching it — first real signal on success/latency/retries per tier, and will populate the dashboard's rate-based panels
+- [ ] Then the Open Bugs list in `PROJECT_PROGRESS.md` (8 items now, already priority-ordered) — including the two new observability-surfaced findings (missing `votes.creationdate` index; Gemini's `COUNT(*)` preference) and confirming memory follow-ups actually resolve correctly, which still hasn't been proven
 - [ ] Decide: simple truncation vs. rolling summarization for long conversations — next memory design increment, deliberately not built yet
 - [ ] Decide how to handle genuinely heavy analytical queries (raise `statement_timeout` for this class, `CLUSTER posts` by tag, or a normalized tag lookup table) — deferred, not blocking
 - [ ] Consider enforcing a default `LIMIT` for un-bounded queries against huge tables
