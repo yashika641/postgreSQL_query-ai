@@ -6,17 +6,20 @@ Completion: 56%
 
 ## Current Phase
 
-Phase 10/11 — FastAPI Backend + React Frontend (user explicitly chose to build these before finishing Phase 7/8 validation/testing — see Deferred)
+MVP considered functionally ready (Phases 1-11 all have working code, backend+frontend verified end-to-end). Next session deliberately jumps to **Phase 13 (Observability) then Phase 12 (Evaluation)** before returning to fix the open bug list below — user's explicit call: get visibility in place before debugging blind, rather than debug first and instrument later.
 
-## Current Task
+## Current Task (session handoff — read this first)
 
-Backend (`backend/api.py`) and frontend (`frontend/`, React + Vite) now exist and were verified working end-to-end for real — not just smoke-tested in isolation. That verification surfaced a genuinely important bug that had been silently waiting in the memory design since it was added: `AgentState.result` held a raw `pandas.DataFrame`, but `SqliteSaver` (added for Phase 8 memory) persists the **entire state** after every node via msgpack, and `DataFrame` isn't msgpack-serializable — so **every single successful query would have crashed** once memory was wired in, not just edge cases. Confirmed via the actual traceback (`TypeError: Type is not msgpack serializable: DataFrame`, inside `SqliteSaver.put_writes`). Fixed by changing `AgentState.result` to a plain JSON-safe `{"columns": [...], "rows": [...]}` dict instead of a DataFrame — `execute_node`, `record_history_node`, `run_question()` (reconstructs a `DataFrame` before returning, to preserve its documented return type for CLI/test callers), `backend/api.py`, and `tests/test_agent.py` all updated to match.
+Backend (`backend/api.py`) and frontend (`frontend/`, React + Vite) exist and were verified working end-to-end via curl (correct answer, HTTP 200, real Gemini round-trip). Two serious bugs were found and fixed during that verification — full detail in Bugs Fixed below:
+1. `AgentState.result` was a raw `DataFrame`, which crashed the `SqliteSaver` checkpointer's msgpack serialization on **every** successful query once memory was added — fixed by storing `{"columns", "rows"}` instead.
+2. `generate_node` had no error handling for the Gemini call itself — fixed by catching `APIError` and adding an `after_generate` router.
 
-Also found and fixed during the same verification pass: `generate_node` had no error handling around the Gemini call itself (only `validate_node`/`execute_node` had try/except for their own failure modes) — a transient API error (429 rate limit, 503 overload, both genuinely observed today) crashed straight out of the graph uncaught, past `api.py`'s own missing error handling, surfacing as a bare unhelpful 500. Fixed by catching `google.genai.errors.APIError` in `generate_node` and adding a proper `after_generate` conditional router (mirroring `after_validate`/`after_execute`) so a generation failure retries through the same attempt-counted loop instead of crashing.
+A third bug was then found by the user actually using the browser (not automation): **`localhost` resolves to the IPv6 loopback (`::1`) on this machine, but uvicorn only binds the IPv4 loopback (`127.0.0.1`)** — so the frontend's `fetch("http://localhost:8000/...")` silently tried the wrong address family and failed with "Failed to fetch," even though curl (pointed at `127.0.0.1` explicitly) worked. Fixed in `frontend/src/api.js` by hardcoding `API_BASE` to `http://127.0.0.1:8000`. **This fix is NOT yet committed** — pick that up at the start of the next session (`git add frontend/src/api.js && git commit`), and confirm with the user that a real browser question now round-trips successfully before moving on, since that confirmation was still pending when this session ended.
 
-End-to-end proof: `curl -X POST http://localhost:8000/chat -d '{"question":"How many questions were posted in 2023?"}'` → HTTP 200, correct answer (993,601), in 43.6s (real Gemini latency, not a hang). The React chat widget renders and accepts input correctly (verified via screenshots), but the actual browser→backend fetch could not be verified end-to-end through browser automation — the automated test tab enforces an ~8.6s fetch timeout, well under Gemini's real ~15-45s response time, and this is confirmed to be a constraint of the automation tooling itself (a plain `fetch()` to `/health` succeeds instantly; only the long-running `/chat` call is affected). A normal (non-automated) browser tab has no such limit. **User needs to verify the full browser flow themselves** — both dev servers are left running (`localhost:5173` frontend, `localhost:8000` backend).
-
-Phase 7/8 (agentic workflow + conversational memory) mechanism is now more solid than before this session (the DataFrame bug fix and the generate-error-handling fix both apply there too — this wasn't backend-specific work, it fixed real defects in `agent.py` itself), but the deliberate validation steps from before (two-question memory smoke test proving follow-ups resolve correctly, full clean `tests/test_agent.py` run) are still not done — see Deferred.
+**Next session's plan, in order:**
+1. Observability: structured logging per graph node (timing + outcome) and per `/chat` request in `backend/api.py`, persisted somewhere reviewable (not just uvicorn stdout) — likely via `logging` + `rich` (already in `requirements.txt`).
+2. Evaluation: re-run `tests/test_agent.py`'s full suite cleanly now that the two blocking bugs are fixed — first real signal on success rate/latency/retries per difficulty tier. Feed real numbers into the AI Evaluation section below.
+3. Debugging pass through the Open Bugs list below, using the new observability data — see that list for suggested order (numbered roughly by priority already).
 
 ## Phase Progress
 
@@ -64,20 +67,28 @@ Deployment                ░░░░░░░░░░ 0%
 - Found + fixed a real bug present since memory was added: `AgentState.result` (a raw `DataFrame`) isn't msgpack-serializable, so `SqliteSaver` crashed on every successful query once persistence was in the picture — changed `result` to a JSON-safe `{"columns", "rows"}` dict across `agent.py`, `backend/api.py`, `tests/test_agent.py`
 - Found + fixed a second real bug: `generate_node` had no error handling for the Gemini call itself — added `after_generate` conditional routing so API errors retry like any other node failure instead of crashing the graph
 - End-to-end verified via curl: NL question → Gemini → safety → Postgres → checkpointed state → HTTP JSON response, correct answer, no crash
+- Found + fixed a third real bug, this one by the user testing in a real browser (not automation): `localhost` resolves to IPv6 (`::1`) on this machine, uvicorn only binds IPv4 (`127.0.0.1`) — `frontend/src/api.js` hardcoded to target `127.0.0.1:8000` explicitly. **Uncommitted** — first thing to do next session.
+- MVP declared functionally ready by the user; session ends here, next session pivots to Observability + Evaluation before further bug fixing (explicit user decision)
 
 ## In Progress
 
-- Phase 10/11 (Backend + Frontend): backend verified working end-to-end for real (curl). Frontend UI verified rendering/accepting input, but the actual browser→backend chat call is unverified — browser-automation tooling's ~8.6s fetch timeout is shorter than Gemini's real response time, so this specific check needs the user to do it themselves in a normal tab. Both dev servers left running (`localhost:5173`, `localhost:8000`).
+- Session handoff: MVP works end-to-end (backend confirmed via curl; frontend fixed for the IPv4/IPv6 issue but not yet re-confirmed by the user in-browser, and that fix isn't committed yet). Next session starts with Observability, not bug fixes — see Current Task above and Next below.
 
 ## Next
 
-1. **User**: open `http://localhost:5173` in a normal browser tab and confirm a real question round-trips correctly through the actual chat widget (this is the one thing automation couldn't verify).
-2. Run `agent.py`'s two-question memory smoke test (same `thread_id`: "...2023?" then "now show me the same thing but for 2022") to confirm follow-ups actually resolve via history — still not done, now more likely to actually work given today's two bug fixes, but not yet proven.
-3. Re-run `tests/test_agent.py`'s full 9-question suite cleanly — previous runs were invalidated first by Gemini quota exhaustion, then by the DataFrame serialization bug (which would have failed every successful case anyway). This will be the first real signal on success/failure/latency per difficulty tier.
-4. Decide: simple truncation (`history[-N:]`) vs. rolling summarization node for keeping long conversations within a reasonable prompt size — still not built.
-5. Decide how to handle genuinely heavy analytical queries like the python-join test (deferred, not blocking): raising `statement_timeout` for this query class, `CLUSTER posts` on the trigram index, or a normalized tag lookup table.
-6. Consider enforcing a default `LIMIT` in `sql_safety.py` for queries without one.
-7. `frontend/App.jsx`'s shell is minimal (just renders `ChatWidget`) — fine as-is, but any visual polish is the user's call since they've opted out of frontend work.
+1. **First thing next session**: commit the uncommitted `frontend/src/api.js` IPv4/IPv6 fix, and confirm with the user that a real browser question now round-trips successfully (this confirmation was still pending when this session ended).
+2. **Observability** (user's explicit priority — before bug fixing): structured logging per graph node (timing + outcome: which node ran, how long, success/failure) and per `/chat` request in `backend/api.py` (question, `thread_id`, total latency, attempts used). Persist somewhere reviewable — likely Python's `logging` module + `rich` (already in `requirements.txt`), not raw uvicorn stdout.
+3. **Evaluation**: re-run `tests/test_agent.py`'s full 9-question suite cleanly now that the DataFrame and generate_node bugs are both fixed — previous runs were invalidated first by Gemini quota exhaustion, then by the DataFrame serialization bug (would have failed every successful case regardless). This will be the first real signal on success/failure/latency per difficulty tier. Feed real numbers into the AI Evaluation section below.
+4. **Then the debugging pass** — see Open Bugs below, already roughly priority-ordered.
+
+## Open Bugs (compiled for the next debugging pass — not yet fixed)
+
+1. **`generate_node` only catches `google.genai.errors.APIError`** — a different Gemini SDK failure mode (e.g. a client-side timeout) may not subclass `APIError` and would still crash the graph uncaught. `backend/api.py`'s `/chat` also has no catch-all around `agent_app.invoke()` beyond the `RuntimeError`→422 path — any other uncaught exception surfaces as a bare, undiagnosable 500. **Highest priority**: most likely to produce another confusing unhandled-error bug, and observability work will make it easy to actually pin down once instrumented.
+2. **`sql_generator.generate_sql()` doesn't validate Gemini's output before returning it** — an empty string or a refusal instead of SQL would pass straight to `validate_sql()` with no earlier, clearer error.
+3. **Conversational memory has never been proven to actually work** — the two-question follow-up test ("now show me the same thing but for 2022") has never successfully run. The crash blocking it is fixed, but nobody has seen a follow-up resolve correctly yet.
+4. **No default `LIMIT` enforcement** in `sql_safety.py` — an unbounded broad question against `posts` can pull an enormous result set into memory with nothing stopping it. Small, contained, no dependencies on anything else.
+5. **No truncation/summarization for long conversation history** — `generate_sql()` dumps the *entire* `history` into every prompt with no cap. Fine now, will grow prompt size/cost unboundedly on a long conversation. Bigger design decision (truncation vs. rolling summarization), tackle once everything else is solid.
+6. **Heavy analytical queries still time out** — the python-join question and the "average reputation per tag" stress question both hit the 30s `statement_timeout` on every attempt. Root-caused (not a missing-index problem, genuinely expensive at 59.5M-row scale). Three options already scoped: raise `statement_timeout` for this query class, `CLUSTER posts` by tag, or normalize `tags` into its own lookup table. Biggest design decision of the list, tackle last.
 
 ## Blockers
 
@@ -93,6 +104,7 @@ Deployment                ░░░░░░░░░░ 0%
 - `generate_node` had no error handling around the Gemini call — only `validate_node`/`execute_node` caught their own failure modes. A transient `google.genai.errors.APIError` (both a 429 rate-limit and a 503 "high demand" were genuinely observed today) crashed straight out of `app.invoke()` uncaught. `backend/api.py` didn't catch it either, so it surfaced as a bare unhelpful 500. Fixed by catching `APIError` in `generate_node` (returns it into `state["error"]` like any other node) and adding a new `after_generate` conditional router — mirroring `after_validate`/`after_execute` — so `generate → validate` is no longer a fixed edge; a generation failure now retries through the same attempt-counted loop instead of crashing.
 - `backend/api.py`'s `ChatResponse.columns` was typed `list[dict]` instead of `list[str]` — column names are strings, so this would fail Pydantic response validation on every successful call. Fixed.
 - Confirmed NOT a bug (checked, not assumed): `backend/api.py` living in a `backend/` subdirectory while `agent.py` stays in the project root works fine for imports, because `uvicorn backend.api:app` run from the project root puts the root on `sys.path` — unlike `tests/test_agent.py`'s situation, which needed an explicit `sys.path.insert`.
+- User tested in a real (non-automated) browser and hit "Failed to fetch" on `/chat` despite curl working fine against the same endpoint. Root cause: `localhost` resolves to the IPv6 loopback (`::1`) on this machine (confirmed via `ping localhost`), but uvicorn only binds the IPv4 loopback (`127.0.0.1`, confirmed via its own startup log) — the frontend's `fetch("http://localhost:8000/...")` was silently trying the wrong address family. Fixed by hardcoding `frontend/src/api.js`'s `API_BASE` to `http://127.0.0.1:8000`. Not yet committed.
 
 ## Bugs Fixed (Phase 8 — conversational memory)
 

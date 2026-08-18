@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: query_ai_backend
+    static_configs:
+      # uvicorn runs on the host (not in a container), so Prometheus
+      # (running inside Docker Desktop) reaches it via host.docker.internal
+      - targets: ["host.docker.internal:8000"]

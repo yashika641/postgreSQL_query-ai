@@ -1,8 +1,14 @@
 {
   "overall_completion": 56,
-  "current_phase": 10,
-  "current_phase_name": "backend_and_frontend",
-  "last_updated": "2026-08-18T14:00:00",
+  "current_phase": 13,
+  "current_phase_name": "observability_then_evaluation",
+  "last_updated": "2026-08-18T15:00:00",
+  "session_handoff": {
+    "mvp_status": "functionally ready end-to-end (backend confirmed via curl; frontend fixed for an IPv4/IPv6 localhost mismatch but not yet re-confirmed by the user in-browser)",
+    "uncommitted_changes": "frontend/src/api.js (API_BASE hardcoded to 127.0.0.1) -- commit this first next session",
+    "next_session_order": ["observability (structured logging per node + per request)", "evaluation (clean full tests/test_agent.py run)", "then the Open Bugs list in PROJECT_PROGRESS.md"],
+    "reasoning": "user's explicit call: instrument for visibility before debugging blind, rather than the reverse"
+  },
   "phases": {
     "database": 100,
     "python": 100,

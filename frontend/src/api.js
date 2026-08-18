@@ -1,4 +1,5 @@
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://127.0.0.1:8000"; // explicit IPv4 -- uvicorn binds 127.0.0.1 only,
+// and "localhost" can resolve to the IPv6 loopback (::1) first on Windows, which nothing listens on
 
 export async function sendMessage(question, threadId) {
   const response = await fetch(`${API_BASE}/chat`, {

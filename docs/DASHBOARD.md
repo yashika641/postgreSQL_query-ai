@@ -2,7 +2,7 @@
 
 > Auto-narrated from `project_metrics.json` and `PROJECT_PROGRESS.md`. Update both whenever this file is regenerated.
 
-**Last updated:** 2026-08-18 · **Overall completion:** **56%** · **Current phase:** `10/11 — FastAPI Backend + React Frontend`
+**Last updated:** 2026-08-18 · **Overall completion:** **56%** · **Current phase:** `MVP ready → pivoting to Observability + Evaluation`
 
 ---
 
@@ -10,21 +10,20 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  PHASE 10/11 · BACKEND + FRONTEND → backend verified live   │
-│  backend/api.py (FastAPI, /chat + /health) and frontend/    │
-│  (React + Vite chat widget) both built. Verification found  │
-│  a serious pre-existing bug: AgentState.result held a raw   │
-│  DataFrame, but SqliteSaver persists the WHOLE state via     │
-│  msgpack every step -- DataFrame isn't serializable, so       │
-│  EVERY successful query would have crashed. Fixed: result    │
-│  is now a plain {"columns","rows"} dict everywhere.           │
-│  Also fixed: generate_node had no error handling for Gemini  │
-│  API failures (429/503, both hit today) -- now retries        │
-│  through the loop like any other node failure instead of      │
-│  crashing. curl end-to-end proof: correct answer, HTTP 200.   │
-│  Frontend UI verified rendering; full browser chat flow        │
-│  needs the user's own check (automation's fetch timeout is    │
-│  shorter than Gemini's real response time)                    │
+│  MVP DECLARED FUNCTIONALLY READY — SESSION HANDOFF            │
+│  Backend + frontend verified end-to-end via curl (correct     │
+│  answer, HTTP 200). Three real bugs found + fixed this        │
+│  session: a DataFrame/msgpack checkpointer crash on EVERY      │
+│  successful query, missing Gemini-API error handling in       │
+│  generate_node, and an IPv4/IPv6 localhost mismatch that       │
+│  broke the browser's fetch() (found by the user testing        │
+│  for real, not by automation). The IPv6 fix is UNCOMMITTED.   │
+│                                                                │
+│  User's explicit next-session plan: Observability first        │
+│  (structured logging per node + per request), then             │
+│  Evaluation (clean tests/test_agent.py run), THEN a debugging  │
+│  pass through the compiled Open Bugs list — visibility          │
+│  before debugging blind, not the reverse.                      │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -119,6 +118,10 @@ flowchart TD
 
 *Real evaluation rigor starts in Phase 12 — this is one manual smoke test, not a benchmark yet.*
 
+## 🐛 Bugs Fixed (session handoff — real browser testing)
+
+- User tested in a real (non-automated) browser tab and hit "Failed to fetch" despite curl working against the same `/chat` endpoint. Root cause: `localhost` resolves to IPv6 (`::1`) on this machine (confirmed via `ping`), uvicorn only binds IPv4 (`127.0.0.1`, confirmed via its own log) — the frontend's `fetch()` was silently trying the wrong address. Fixed by hardcoding `frontend/src/api.js`'s `API_BASE` to `http://127.0.0.1:8000`. **Not yet committed** — first thing to do next session.
+
 ## 🐛 Bugs Fixed (Phase 10/11 — backend + frontend verification)
 
 - `AgentState.result` was a raw `pandas.DataFrame`. `SqliteSaver` persists the *whole* state via msgpack after every node — `DataFrame` has no msgpack representation, so **every successful query crashed** (`TypeError: Type is not msgpack serializable: DataFrame`), not an edge case. Existed since memory was added, only surfaced now under a real end-to-end test. Fixed: `result` is now `{"columns": [...], "rows": [...]}` everywhere (`agent.py`, `backend/api.py`, `tests/test_agent.py`); `run_question()` reconstructs a `DataFrame` before returning to preserve its documented type for CLI/test callers.
@@ -175,13 +178,15 @@ flowchart TD
 - GitHub Actions QC discussed, deliberately deferred to Phase 14 (CI can't reach the local 117GB DB)
 - `backend/api.py`: FastAPI `/chat` + `/health`, CORS configured for the Vite dev origin, verified working end-to-end via curl (correct answer, HTTP 200)
 - `frontend/`: React + Vite chat widget, built by Claude per the user's request (not pseudocode-first, unlike the Python files) — UI verified rendering and accepting input via screenshots
-- Two real bugs found and fixed during end-to-end verification: the `DataFrame`/msgpack checkpointer crash (affected every successful query since memory was added) and missing error handling in `generate_node` for Gemini API failures
+- Three real bugs found and fixed during end-to-end verification: the `DataFrame`/msgpack checkpointer crash (affected every successful query since memory was added), missing error handling in `generate_node` for Gemini API failures, and an IPv4/IPv6 `localhost` mismatch breaking the browser's `fetch()`
+- MVP declared functionally ready by the user — session ends here, next session pivots to Observability + Evaluation before further bug fixing
 
 ## 🔜 What's Left (immediate)
 
-- [ ] **User**: open `http://localhost:5173` in a normal browser tab and confirm a real question round-trips correctly — the one thing automated browser testing couldn't verify (its ~8.6s fetch timeout is shorter than Gemini's real response time)
-- [ ] Run `agent.py`'s two-question smoke test to confirm follow-up questions actually resolve via history — still not done, more likely to work now given today's fixes
-- [ ] Re-run `tests/test_agent.py`'s full suite cleanly — earlier runs were invalidated by quota exhaustion, then by the DataFrame bug
+- [ ] Commit `frontend/src/api.js`'s IPv4/IPv6 fix, and get the user's confirmation that a real browser question now round-trips successfully (first thing next session)
+- [ ] **Observability**: structured logging per graph node (timing + outcome) and per `/chat` request, persisted somewhere reviewable — not just uvicorn stdout
+- [ ] **Evaluation**: re-run `tests/test_agent.py`'s full suite cleanly now both blocking bugs are fixed — first real signal on success/latency/retries per tier
+- [ ] Then the Open Bugs list in `PROJECT_PROGRESS.md` (6 items, already priority-ordered) — including confirming memory follow-ups actually resolve correctly, which still hasn't been proven
 - [ ] Decide: simple truncation vs. rolling summarization for long conversations — next memory design increment, deliberately not built yet
 - [ ] Decide how to handle genuinely heavy analytical queries (raise `statement_timeout` for this class, `CLUSTER posts` by tag, or a normalized tag lookup table) — deferred, not blocking
 - [ ] Consider enforcing a default `LIMIT` for un-bounded queries against huge tables

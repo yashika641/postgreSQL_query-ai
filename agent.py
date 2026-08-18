@@ -14,6 +14,7 @@ from typing import Annotated
 import operator
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
+from observalibilty.evaluation.observability import log_node
 
 
 MAX_ATTEMPTS = 3
@@ -38,6 +39,7 @@ class AgentState(TypedDict):
 # Each node: takes the current state dict, returns a dict of the fields
 # it changed (LangGraph merges this into state — you don't mutate in place).
 
+@log_node("generate")
 def generate_node(state:AgentState)-> dict:
     try:
         sql = generate_sql(state['question'], previous_error=state.get("error"), history=state.get("history",[]))
@@ -52,6 +54,7 @@ def generate_node(state:AgentState)-> dict:
             'error': f"SQL generation failed: {e}",
         }
 
+@log_node("record_history")
 def record_history_node(state: AgentState)-> dict:
     turn = {
         "question": state["question"],
@@ -60,6 +63,7 @@ def record_history_node(state: AgentState)-> dict:
     return {"history":[turn]}
     
     
+@log_node("validate")
 def validate_node(state: AgentState)-> dict:
     try:
         validated= validate_sql(state['sql'])
@@ -68,6 +72,7 @@ def validate_node(state: AgentState)-> dict:
     except SQLSafetyError as e:
         return {"error":f"sql genearated failed safety validation due to {e}"}
 
+@log_node("execute")
 def execute_node(state: AgentState)-> dict:
     try:
         with engine.connect() as conn:

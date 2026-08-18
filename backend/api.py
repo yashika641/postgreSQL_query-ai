@@ -1,11 +1,15 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from prometheus_client import make_asgi_app
+import time
 import uuid
 
 from agent import app as agent_app
+from observalibilty.evaluation.observability import log_chat_request
 
 app= FastAPI()
+app.mount("/metrics", make_asgi_app())
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,8 +32,9 @@ class chatresponse(BaseModel):
     
 @app.post('/chat', response_model=chatresponse)
 def chat(request:chatrequest):
+    start = time.perf_counter()
     thread_id = request.thread_id or str(uuid.uuid4())
-    
+
     initial_state = {
         'question': request.question,
         'sql': None,
@@ -38,15 +43,21 @@ def chat(request:chatrequest):
         'error': None,
         'attempts':0,
     }
-    
+
     config= {'configurable': {'thread_id':thread_id}}
-    
+
     final_state = agent_app.invoke(initial_state,config=config)
-    
+    duration_ms = (time.perf_counter() - start) * 1000
+
     if final_state['result'] is None:
+        log_chat_request(request.question, thread_id, duration_ms,
+                          final_state['attempts'], success=False, error=final_state['error'])
         raise HTTPException(status_code=422, detail=final_state['error'])
-    
+
     result = final_state['result']
+
+    log_chat_request(request.question, thread_id, duration_ms,
+                      final_state['attempts'], success=True)
 
     return chatresponse(
         thread_id = thread_id,
