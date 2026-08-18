@@ -1,14 +1,17 @@
 {
-  "overall_completion": 60,
-  "current_phase": 12,
-  "current_phase_name": "evaluation",
-  "last_updated": "2026-08-18T18:20:00",
+  "overall_completion": 61,
+  "current_phase": 6,
+  "current_phase_name": "debugging_pass",
+  "last_updated": "2026-08-18T19:10:00",
   "session_handoff": {
     "mvp_status": "functionally ready end-to-end (backend confirmed via curl; frontend fixed for an IPv4/IPv6 localhost mismatch but not yet re-confirmed by the user in-browser)",
     "uncommitted_changes": "frontend/src/api.js (API_BASE hardcoded to 127.0.0.1) -- still not committed, not currently blocking anything",
     "observability_status": "implemented and verified live: structured JSON logs (logs/agent.log), Prometheus metrics (/metrics), Grafana dashboard 'Query AI - Observability' (uid query-ai-observability) confirmed rendering real data via browser check",
     "grafana_credentials_note": "admin password was reset to admin/admin via 'docker exec grafana-1 grafana cli admin reset-admin-password admin' after the UI's first-login flow had changed it; the post-login 'update your password' prompt was skipped so admin/admin keeps working for API calls",
-    "next_session_order": ["evaluation (clean full tests/test_agent.py run, now with observability watching it)", "then the Open Bugs list in PROJECT_PROGRESS.md, including two new observability-surfaced findings"],
+    "eval_status": "first full 9-question suite run complete (eval_results_20260818_190634.csv). Only Q1-4 and Q7 are clean signal; Q5,6,8,9 hit Gemini's 20-req/day free-tier quota mid-run and are excluded, not counted as real failures.",
+    "model_name_note": "sql_generator.py calls gemini-3.5-flash, not gemini-2.5-flash as previously documented -- confirmed intentional by the user, docs corrected in PROJECT_PROGRESS.md and docs/DASHBOARD.md",
+    "quota_workaround": "user's explicit decision: test in small batches (1-2 questions) going forward instead of full-suite runs, rather than upgrading to a paid API tier",
+    "next_session_order": ["Open Bugs debugging pass, starting with #7 (votes.creationdate index) and #8 (COUNT(*) prompt nudge) since both are already confirmed and cheap"],
     "reasoning": "user's explicit call: instrument for visibility before debugging blind, rather than the reverse"
   },
   "phases": {
@@ -23,7 +26,7 @@
     "visualization": 0,
     "api": 60,
     "frontend": 50,
-    "evaluation": 0,
+    "evaluation": 50,
     "observability": 90,
     "deployment": 0
   },
@@ -33,9 +36,9 @@
     "failed_queries": 2,
     "sql_accuracy": 60,
     "answer_accuracy": 100,
-    "average_latency_ms": null,
-    "average_retries": 1.5,
-    "notes": "5th test = two live /chat calls made while verifying observability. 'questions posted in 2023' succeeded on attempt 2 (attempt 1's Gemini-generated COUNT(*) timed out at 30s, attempt 2 used COUNT(id) and finished in ~2.8s). 'upvotes cast in 2022' failed all 3 attempts (votes.creationdate has no index -- new Open Bugs item). Earlier full 9-question suite runs are invalidated (quota exhaustion, then the DataFrame bug) and not counted here; Phase 12 will supersede this with a full clean run."
+    "average_latency_ms": 65900,
+    "average_retries": 1.7,
+    "notes": "First full 9-question suite run (2026-08-18, eval_results_20260818_190634.csv). Only Q1-4 and Q7 counted as clean signal -- Q5,6,8,9 hit Gemini's 20-req/day free-tier quota mid-run (429 RESOURCE_EXHAUSTED) and are excluded. Successes: 'questions posted in 2023' (2 attempts, 105.8s), 'posts marked as duplicates' (2 attempts, 53.2s), 'who are the best users' (1 attempt, 3.3s). Failures (genuine, unrecovered): 'upvotes cast in 2022' and 'rep>1000, never deletion-voted' (3 attempts each, 172.8s/212.5s) -- both root-caused to votes.creationdate having no index, Open Bugs #7."
   },
   "database_status": {
     "postgres_version": "18",

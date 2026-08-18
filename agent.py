@@ -53,6 +53,19 @@ def generate_node(state:AgentState)-> dict:
             'attempts': state['attempts']+1,
             'error': f"SQL generation failed: {e}",
         }
+    except Exception as e:
+        '''-- NEW: catches whatever APIError doesn't (timeouts, network errors,
+        -- other SDK-internal exceptions) so the graph retries through the
+        -- normal after_generate router instead of crashing uncaught.
+        -- Must come AFTER the APIError clause -- Python matches except
+        -- blocks top-to-bottom, and Exception would otherwise swallow
+        -- APIError too, silently losing the more specific error message.'''
+        return {
+            "attempts": state["attempts"] + 1,
+            "error": "SQL generation failed (unexpected): " + str(e)
+        }
+        
+        
 
 @log_node("record_history")
 def record_history_node(state: AgentState)-> dict:

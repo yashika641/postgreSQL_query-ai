@@ -34,3 +34,16 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS posts_tags_trgm_idx
 -- can't estimate the new GIN index's selectivity and silently skips it,
 -- falling back to a full filter scan even though the index exists.
 ANALYZE posts;
+
+-- Fixes a statement_timeout found via observability logs (Open Bugs #7):
+-- votes has ~236M rows and only a primary key index on id -- no coverage
+-- on votetypeid or creationdate at all. A creationdate-range + votetypeid
+-- question ("how many upvotes were cast in 2022?") forced a full scan and
+-- timed out on all 3 self-correction attempts. Same column-order pattern
+-- as posts_posttypeid_creationdate_idx: equality filter (votetypeid) leads,
+-- range filter (creationdate) follows.
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS votes_votetypeid_creationdate_idx
+    ON votes (votetypeid, creationdate);
+
+ANALYZE votes;

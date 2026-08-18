@@ -2,7 +2,7 @@
 
 > Auto-narrated from `project_metrics.json` and `PROJECT_PROGRESS.md`. Update both whenever this file is regenerated.
 
-**Last updated:** 2026-08-18 · **Overall completion:** **60%** · **Current phase:** `Observability done → Evaluation next`
+**Last updated:** 2026-08-18 · **Overall completion:** **61%** · **Current phase:** `Observability + first Evaluation done → Open Bugs debugging pass`
 
 ---
 
@@ -10,31 +10,35 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  OBSERVABILITY LIVE — STRUCTURED LOGS + PROMETHEUS +           │
-│  GRAFANA, VERIFIED WITH REAL DATA                              │
+│  OBSERVABILITY LIVE + FIRST EVAL BASELINE IN — DEBUGGING       │
+│  PASS STARTS NEXT                                              │
 │  observalibilty/evaluation/{metrics,observability}.py wired    │
 │  into all 4 agent.py nodes + backend/api.py's /chat. Docker    │
-│  Compose runs Prometheus (scraping /metrics) + Grafana; a      │
-│  7-panel dashboard was pushed via API and confirmed rendering  │
-│  real data in a live browser check.                            │
+│  Compose runs Prometheus + Grafana; a 7-panel dashboard was    │
+│  pushed via API, confirmed rendering real data.                │
 │                                                                │
-│  It immediately surfaced two real findings: votes has no       │
-│  index on creationdate (unrecovered timeout, 3/3 attempts      │
-│  failed), and Gemini prefers COUNT(*) over COUNT(id) on huge   │
-│  tables (recoverable but wastes a 30s attempt). Both logged    │
-│  as new Open Bugs items.                                       │
+│  Full 9-question eval suite ran: 3/9 succeeded outright, but   │
+│  4 of the 6 "failures" were Gemini's 20-req/day free-tier      │
+│  quota running out mid-suite (429 RESOURCE_EXHAUSTED), not     │
+│  real bugs — excluded from the numbers below. The 2 genuine    │
+│  failures both trace to votes.creationdate having no index.    │
+│  Also caught: sql_generator.py runs gemini-3.5-flash, not      │
+│  gemini-2.5-flash as previously documented (confirmed          │
+│  intentional; docs corrected).                                 │
 │                                                                │
-│  Next: Evaluation (clean tests/test_agent.py run) — will       │
-│  also fill in the dashboard's rate()-based latency panels,     │
-│  which were still sparse at verification time. Then the        │
-│  Open Bugs debugging pass.                                     │
+│  Decision: work around the quota by testing in small batches   │
+│  going forward rather than upgrading billing.                  │
+│                                                                │
+│  Next: Open Bugs debugging pass, starting with #7 (votes       │
+│  index) and #8 (COUNT(*) prompt nudge) — both already          │
+│  confirmed and cheap.                                          │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ## 🧭 Overall Completion
 
 ```
-[████████████████████████░░░░░░░░░░░░░░]  60%
+[████████████████████████░░░░░░░░░░░░░░]  61%
 ```
 
 ## 🪜 Phase-by-Phase Progress
@@ -52,7 +56,7 @@
 | 9 | Result Intelligence / Viz | ⬜ Not Started | `░░░░░░░░░░` 0% |
 | 10 | FastAPI Backend | 🟡 In Progress | `██████░░░░` 60% |
 | 11 | Frontend | 🟡 In Progress | `█████░░░░░` 50% |
-| 12 | Evaluation | ⬜ Not Started | `░░░░░░░░░░` 0% |
+| 12 | Evaluation | 🟡 In Progress | `█████░░░░░` 50% |
 | 13 | Observability | 🟢 Near-Complete | `█████████░` 90% |
 | 14 | Docker + Deployment | ⬜ Not Started | `░░░░░░░░░░` 0% |
 
@@ -64,7 +68,7 @@ xychart-beta
     title "Phase Completion %"
     x-axis ["DB", "Python", "Schema", "SQL Gen", "Safety", "Exec", "Agent", "Memory", "Viz", "API", "Frontend", "Eval", "Observ.", "Deploy"]
     y-axis "Completion %" 0 --> 100
-    bar [100, 100, 100, 100, 100, 70, 60, 40, 0, 60, 50, 0, 90, 0]
+    bar [100, 100, 100, 100, 100, 70, 60, 40, 0, 60, 50, 50, 90, 0]
 ```
 
 ## 🗺️ Milestone Timeline
@@ -109,20 +113,22 @@ flowchart TD
     style GEN fill:#fff3cd,stroke:#d4a017
 ```
 
-## 🧪 Evaluation Metrics (populates from Phase 12 onward)
+## 🧪 Evaluation Metrics (first full suite run, 2026-08-18)
 
 | Metric | Value |
 |---|---|
-| Questions tested | 5 |
+| Questions tested (clean signal) | 5 of 9 — the other 4 hit a Gemini free-tier quota limit mid-run, excluded |
 | SQL execution success rate | 60% (3/5) |
 | Answer accuracy | 100% on completed queries |
-| Average retries | 1.5 (0 on clean successes, up to 3/3 max on unrecovered timeouts) |
-| Average latency | not yet measured |
+| Average retries | 1.7 across successes (2, 2, 1 attempts); both failures hit max (3/3) |
+| Average latency | 65.9s across the 5 clean results — dominated by 30s-per-timed-out-attempt cost |
 | Token usage / query | not yet measured |
 
-Latest two: "questions posted in 2023" succeeded on attempt 2 (attempt 1's `COUNT(*)` timed out at 30s, attempt 2's `COUNT(id)` finished in ~2.8s); "upvotes cast in 2022" failed all 3 attempts (`votes.creationdate` has no index).
+Successes: "questions posted in 2023" (2 attempts, 105.8s — attempt 1's `COUNT(*)` timed out, attempt 2's `COUNT(id)` succeeded), "posts marked as duplicates" (2 attempts, 53.2s), "who are the best users" (1 attempt, 3.3s). Genuine failures: "upvotes cast in 2022" and "rep>1000, never deletion-voted" — both hit 3/3 attempts, both root-caused to `votes.creationdate` having no index.
 
-*Real evaluation rigor starts in Phase 12 — these are manual smoke tests via observability, not a benchmark yet. Phase 12 will run the full 9-question suite cleanly.*
+**Excluded (not real failures):** the hard/stress-tier questions (5, 6, 8, 9) returned `429 RESOURCE_EXHAUSTED` — Gemini's free tier caps at 20 requests/day/project/model, and this run's up-to-27 generate calls burned through it mid-suite. Re-test these once quota resets, in small batches.
+
+*Full results: `eval_results_20260818_190634.csv`. Next: re-run the hard/stress tier once the two confirmed bugs (`votes` index, `COUNT(*)` prompt bias) are fixed, to get a real baseline unaffected by known issues.*
 
 ## 🐛 Bugs Fixed (session handoff — real browser testing)
 
@@ -170,7 +176,7 @@ Latest two: "questions posted in 2023" succeeded on attempt 2 (attempt 1's `COUN
 - Python project scaffold complete: venv, `requirements.txt`, `.env`, `database.py`
 - Schema reflection (`schema.py`), hand-encoded FK relationships (`relationships.py`), and lookup-code documentation (`lookups.py`) merged into one structured schema
 - `schema_prompt.py` renders that schema as `CREATE TABLE`-style DDL for the LLM prompt
-- `sql_generator.py` (Gemini, `gemini-2.5-flash`) generates SQL from a natural-language question + schema context
+- `sql_generator.py` (Gemini, `gemini-3.5-flash`) generates SQL from a natural-language question + schema context
 - `sql_safety.py` validates single-statement SELECT-only, including a token scan that catches writable CTEs
 - `executor.py` chains generation → validation → execution with a 3-attempt self-correction retry loop
 - Added `posts_posttypeid_creationdate_idx` after discovering the missing index via a real timeout
@@ -192,9 +198,9 @@ Latest two: "questions posted in 2023" succeeded on attempt 2 (attempt 1's `COUN
 ## 🔜 What's Left (immediate)
 
 - [x] **Observability**: structured logging per graph node + per `/chat` request, Prometheus + Grafana with a live dashboard — done and verified
+- [x] **Evaluation (first pass)**: full 9-question suite run — 5/9 clean signal, 4/9 invalidated by Gemini's daily quota. Re-run the invalidated tier once quota resets and the two confirmed bugs below are fixed
 - [ ] Commit `frontend/src/api.js`'s IPv4/IPv6 fix, and get the user's confirmation that a real browser question now round-trips successfully (still pending, not currently blocking)
-- [ ] **Evaluation**: run `tests/test_agent.py`'s full 9-question suite cleanly, now with observability watching it — first real signal on success/latency/retries per tier, and will populate the dashboard's rate-based panels
-- [ ] Then the Open Bugs list in `PROJECT_PROGRESS.md` (8 items now, already priority-ordered) — including the two new observability-surfaced findings (missing `votes.creationdate` index; Gemini's `COUNT(*)` preference) and confirming memory follow-ups actually resolve correctly, which still hasn't been proven
+- [ ] **Open Bugs debugging pass** (`PROJECT_PROGRESS.md`, 8 items, priority-ordered) — start with #7 (`votes.creationdate` index) and #8 (Gemini's `COUNT(*)` preference), both already confirmed and cheap; also includes confirming memory follow-ups actually resolve correctly, which still hasn't been proven
 - [ ] Decide: simple truncation vs. rolling summarization for long conversations — next memory design increment, deliberately not built yet
 - [ ] Decide how to handle genuinely heavy analytical queries (raise `statement_timeout` for this class, `CLUSTER posts` by tag, or a normalized tag lookup table) — deferred, not blocking
 - [ ] Consider enforcing a default `LIMIT` for un-bounded queries against huge tables

@@ -6,9 +6,24 @@ Completion: 60%
 
 ## Current Phase
 
-Observability (Phase 13) is implemented and verified end-to-end. Next up: **Phase 12 (Evaluation)** — run `tests/test_agent.py`'s full suite now that there's real instrumentation to watch it through — then the Open Bugs debugging pass below.
+Observability (Phase 13) and a first Evaluation run (Phase 12) are both done. Next: the Open Bugs debugging pass below, starting with the two cheapest confirmed fixes (#7, #8).
 
 ## Current Task (session handoff — read this first)
+
+**Evaluation ran — real baseline, but partially contaminated by a Gemini free-tier quota limit, not code bugs:**
+
+`tests/test_agent.py`'s full 9-question suite ran clean end-to-end (no crashes). 3/9 succeeded. Results for questions 1-4 and 7 are clean signal:
+- Q1 "questions posted in 2023" — OK, 2 attempts, 105.8s (attempt 1 timed out on `COUNT(*)`, attempt 2 succeeded with `COUNT(id)` — Open Bugs #8)
+- Q2 "upvotes cast in 2022" — **FAILED**, 3 attempts, 172.8s (`votes.creationdate` has no index — Open Bugs #7, all 3 attempts genuinely timed out)
+- Q3 "posts marked as duplicates" — OK, 2 attempts, 53.2s
+- Q4 "rep>1000, never deletion-voted" — **FAILED**, 3 attempts, 212.5s (same missing-index class of failure)
+- Q7 "who are the best users" (ambiguous) — OK, 1 attempt, 3.3s
+
+Questions 5, 6, 8, 9 all failed too, but their logs show `429 RESOURCE_EXHAUSTED` from Gemini (`generativelanguage.googleapis.com/generate_content_free_tier_requests`, **limit: 20/day/project/model**) — a single 9-question run can burn up to 27 generate calls (3 attempts × 9 questions), so the free tier ran out mid-suite. **Those 4 results are noise, not evidence those questions are broken** — don't treat them as confirmed bugs. Results saved to `eval_results_20260818_190634.csv`.
+
+Also found while investigating: `sql_generator.py` actually calls **`gemini-3.5-flash`**, not `gemini-2.5-flash` as previously documented here — confirmed intentional by the user, docs corrected throughout this file and `docs/DASHBOARD.md`.
+
+**Decision on the quota limit**: work around it rather than upgrading billing — test in small batches (1-2 questions) instead of full 9-question sweeps going forward, and treat any `RESOURCE_EXHAUSTED` result as noise to re-test later, not a real failure.
 
 **Observability is done and verified working, not just written:**
 - `observalibilty/evaluation/metrics.py` — Prometheus `Counter`/`Histogram` definitions (per-node duration/outcomes, per-request duration/count/attempts)
@@ -24,9 +39,7 @@ Observability (Phase 13) is implemented and verified end-to-end. Next up: **Phas
 
 Still outstanding from before: `frontend/src/api.js`'s IPv4/IPv6 fix is **still uncommitted** — hasn't blocked anything since the backend's been run directly, but pick it up before frontend work resumes.
 
-**Next, in order:**
-1. Evaluation: run `tests/test_agent.py`'s full 9-question suite now that observability is live — first real signal on success/latency/retries per difficulty tier, and will populate the Grafana rate-based panels with meaningful data. Feed results into the AI Evaluation section below.
-2. Debugging pass through the Open Bugs list, now including the two observability-surfaced findings — see that list for priority order.
+**Next**: the Open Bugs debugging pass, starting with #7 (`votes` index) and #8 (`COUNT(*)` prompt nudge) since both are already confirmed and cheap, then working down the priority-ordered list. Test fixes in small batches (1-2 questions) to stay under the Gemini quota rather than re-running the full suite each time.
 
 ## Phase Progress
 
@@ -42,7 +55,7 @@ Memory                    ████░░░░░░ 40%
 Visualization             ░░░░░░░░░░ 0%
 API                       ██████░░░░ 60%
 Frontend                  █████░░░░░ 50%
-Evaluation                ░░░░░░░░░░ 0%
+Evaluation                █████░░░░░ 50%
 Observability             █████████░ 90%
 Deployment                ░░░░░░░░░░ 0%
 ```
@@ -58,7 +71,7 @@ Deployment                ░░░░░░░░░░ 0%
 - Implicit FK relationships hand-encoded in `relationships.py` (13 relationships across the 7 tables, since the dump has no real FK constraints) and merged into `schema.py`'s output as a `foreign_keys` list per table
 - Lookup-code tables hand-documented in `lookups.py` (`posttypeid`, `votetypeid`, `linktypeid` — Stack Overflow encodes these as bare integers with no in-database lookup table)
 - `schema_prompt.py` renders the reflected schema as `CREATE TABLE`-style DDL text with FK relationships and lookup-code meanings as comments — this is the exact string injected into the LLM prompt. Chose DDL over raw JSON for token efficiency and because it matches the format LLMs are most reliably trained on for SQL tasks; FKs are rendered as comments rather than real `FOREIGN KEY` clauses since the dump doesn't enforce them (orphaned references exist)
-- `sql_generator.py` built with the Gemini SDK (`google-genai`, model `gemini-2.5-flash`): first end-to-end test — "How many questions were posted in 2023?" — correctly generated `SELECT COUNT(id) FROM posts WHERE posttypeid = 1 AND EXTRACT(YEAR FROM creationdate) = 2023;`, confirming the schema context (including the `posttypeid` lookup) is reaching the model correctly
+- `sql_generator.py` built with the Gemini SDK (`google-genai`, model `gemini-3.5-flash`): first end-to-end test — "How many questions were posted in 2023?" — correctly generated `SELECT COUNT(id) FROM posts WHERE posttypeid = 1 AND EXTRACT(YEAR FROM creationdate) = 2023;`, confirming the schema context (including the `posttypeid` lookup) is reaching the model correctly
 - `executor.py` built: chains `generate_sql()` → `validate_sql()` → `pandas.read_sql()` against `engine`, with a self-correction retry loop (max 3 attempts) that feeds the previous error back into the next `generate_sql()` call
 - Added `posts_posttypeid_creationdate_idx` (`sql/add_indexes.sql`, built `CONCURRENTLY`) after the first real end-to-end run hit the read-only role's 30s `statement_timeout` on a date-filtered query — `posts` had no index covering `creationdate` despite that being one of the most common query shapes. Added `sql/check_index_progress.sql` (queries `pg_stat_progress_create_index`) for monitoring long index builds.
 - First full pipeline success: "How many questions were posted in 2023?" → 993,601 (NL question → Gemini → safety validation → Postgres → DataFrame, end to end)
@@ -163,11 +176,15 @@ Deployment                ░░░░░░░░░░ 0%
 
 ## AI Evaluation
 
-Questions tested: 2
-SQL success rate: 50% (1/2) — "questions posted in 2023?" succeeded (993,601, matches expected logic); "top 5 users by reputation who answered questions about python" generated correct-looking SQL each of 3 retry attempts but timed out at 30s on all three (genuine query cost, not a generation error)
-Answer accuracy: 1/1 on completed queries (the timeout case never produced an answer to check)
-Average latency: not yet measured
-Average retries: 3/3 (max) on the timeout case, 0 on the first success
+**First full 9-question suite run (2026-08-18, `eval_results_20260818_190634.csv`).** Only questions 1-4 and 7 are clean signal — 5, 6, 8, 9 hit Gemini's 20-req/day free-tier quota mid-run and are excluded, not counted as failures.
+
+Questions tested (clean signal): 5
+SQL success rate: 60% (3/5) — successes: "questions posted in 2023" (2 attempts, 105.8s), "posts marked as duplicates" (2 attempts, 53.2s), "who are the best users" (1 attempt, 3.3s). Failures: "upvotes cast in 2022" and "rep>1000, never deletion-voted" — both genuine unrecovered timeouts (missing `votes.creationdate` index, Open Bugs #7), not generation errors.
+Answer accuracy: 100% on completed queries
+Average latency: 65.9s across the 5 clean results (105.8, 53.2, 3.3s for successes; 172.8, 212.5s for the two timeout failures) — dominated by the 30s-per-timed-out-attempt cost, not generation time
+Average retries: 2/2 on the two failures (hit MAX_ATTEMPTS=3 but counted from 0), 1.7 average attempts across successes (2, 2, 1)
+
+*Not yet measured cleanly: questions 5, 6, 8, 9 (hard/stress tier) — re-run once daily quota resets, in small batches.*
 
 ## Architecture Changes
 

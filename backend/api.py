@@ -46,7 +46,14 @@ def chat(request:chatrequest):
 
     config= {'configurable': {'thread_id':thread_id}}
 
-    final_state = agent_app.invoke(initial_state,config=config)
+    try:
+        final_state = agent_app.invoke(initial_state,config=config)
+    except Exception as e:
+        # NEW: catches anything that escapes the graph entirely (a crash
+        # LangGraph itself couldn't route around), so /chat returns a
+        # clear 500 instead of FastAPI's default opaque one
+        raise HTTPException(status_code=500, detail=str(e))
+    
     duration_ms = (time.perf_counter() - start) * 1000
 
     if final_state['result'] is None:
