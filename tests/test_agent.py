@@ -59,7 +59,7 @@ def run_case(case: dict, thread_id: str)-> dict:
             "success": success,
             "attempts": final_state["attempts"],
             "latency_s": round(elapsed, 2),
-            "rows_returned": len(final_state["result"]) if success else None,
+            "rows_returned": len(final_state["result"]["rows"]) if success else None,
             "error": final_state["error"] if not success else None,
         }
 

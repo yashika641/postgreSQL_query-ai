@@ -2,7 +2,7 @@
 
 > Auto-narrated from `project_metrics.json` and `PROJECT_PROGRESS.md`. Update both whenever this file is regenerated.
 
-**Last updated:** 2026-08-17 · **Overall completion:** **46%** · **Current phase:** `8 — Conversational Memory`
+**Last updated:** 2026-08-18 · **Overall completion:** **56%** · **Current phase:** `10/11 — FastAPI Backend + React Frontend`
 
 ---
 
@@ -10,24 +10,28 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  PHASE 8 · CONVERSATIONAL MEMORY → ~20%                     │
-│  agent.py: history reducer field (accumulates across turns) │
-│  + record_history_node (success-path only) + SqliteSaver    │
-│  checkpointer keyed by thread_id (per-conversation isolation)│
-│  generate_sql() now prompt-injects prior turns so follow-ups │
-│  like "now show 2022 instead" can resolve "the same thing"  │
-│  Scoped deliberately: no truncation/summarization yet for    │
-│  long conversations — explicit next step, not forgotten      │
-│  Both files hand-written from pseudocode, needed real fixes  │
-│  (SyntaxErrors, a context-manager/module-scope API mismatch) │
-│  before they'd run — now a recurring, expected step           │
+│  PHASE 10/11 · BACKEND + FRONTEND → backend verified live   │
+│  backend/api.py (FastAPI, /chat + /health) and frontend/    │
+│  (React + Vite chat widget) both built. Verification found  │
+│  a serious pre-existing bug: AgentState.result held a raw   │
+│  DataFrame, but SqliteSaver persists the WHOLE state via     │
+│  msgpack every step -- DataFrame isn't serializable, so       │
+│  EVERY successful query would have crashed. Fixed: result    │
+│  is now a plain {"columns","rows"} dict everywhere.           │
+│  Also fixed: generate_node had no error handling for Gemini  │
+│  API failures (429/503, both hit today) -- now retries        │
+│  through the loop like any other node failure instead of      │
+│  crashing. curl end-to-end proof: correct answer, HTTP 200.   │
+│  Frontend UI verified rendering; full browser chat flow        │
+│  needs the user's own check (automation's fetch timeout is    │
+│  shorter than Gemini's real response time)                    │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ## 🧭 Overall Completion
 
 ```
-[██████████████████░░░░░░░░░░░░░░░░░░░░░░]  46%
+[███████████████████████░░░░░░░░░░░░░░░]  56%
 ```
 
 ## 🪜 Phase-by-Phase Progress
@@ -40,11 +44,11 @@
 | 4 | NL → SQL Generation | 🟢 Complete | `██████████` 100% |
 | 5 | SQL Safety & Validation | 🟢 Complete | `██████████` 100% |
 | 6 | Execution + Self-Correction | 🟡 In Progress | `███████░░░` 70% |
-| 7 | Agentic Workflow (LangGraph) | 🟡 In Progress | `█████░░░░░` 50% |
-| 8 | Conversational Memory | 🟡 In Progress | `██░░░░░░░░` 20% |
+| 7 | Agentic Workflow (LangGraph) | 🟡 In Progress | `██████░░░░` 60% |
+| 8 | Conversational Memory | 🟡 In Progress | `████░░░░░░` 40% |
 | 9 | Result Intelligence / Viz | ⬜ Not Started | `░░░░░░░░░░` 0% |
-| 10 | FastAPI Backend | ⬜ Not Started | `░░░░░░░░░░` 0% |
-| 11 | Frontend | ⬜ Not Started | `░░░░░░░░░░` 0% |
+| 10 | FastAPI Backend | 🟡 In Progress | `██████░░░░` 60% |
+| 11 | Frontend | 🟡 In Progress | `█████░░░░░` 50% |
 | 12 | Evaluation | ⬜ Not Started | `░░░░░░░░░░` 0% |
 | 13 | Observability | ⬜ Not Started | `░░░░░░░░░░` 0% |
 | 14 | Docker + Deployment | ⬜ Not Started | `░░░░░░░░░░` 0% |
@@ -57,7 +61,7 @@ xychart-beta
     title "Phase Completion %"
     x-axis ["DB", "Python", "Schema", "SQL Gen", "Safety", "Exec", "Agent", "Memory", "Viz", "API", "Frontend", "Eval", "Observ.", "Deploy"]
     y-axis "Completion %" 0 --> 100
-    bar [100, 100, 100, 100, 100, 70, 50, 20, 0, 0, 0, 0, 0, 0]
+    bar [100, 100, 100, 100, 100, 70, 60, 40, 0, 60, 50, 0, 0, 0]
 ```
 
 ## 🗺️ Milestone Timeline
@@ -115,6 +119,13 @@ flowchart TD
 
 *Real evaluation rigor starts in Phase 12 — this is one manual smoke test, not a benchmark yet.*
 
+## 🐛 Bugs Fixed (Phase 10/11 — backend + frontend verification)
+
+- `AgentState.result` was a raw `pandas.DataFrame`. `SqliteSaver` persists the *whole* state via msgpack after every node — `DataFrame` has no msgpack representation, so **every successful query crashed** (`TypeError: Type is not msgpack serializable: DataFrame`), not an edge case. Existed since memory was added, only surfaced now under a real end-to-end test. Fixed: `result` is now `{"columns": [...], "rows": [...]}` everywhere (`agent.py`, `backend/api.py`, `tests/test_agent.py`); `run_question()` reconstructs a `DataFrame` before returning to preserve its documented type for CLI/test callers.
+- `generate_node` had no error handling for the Gemini call itself — a transient `APIError` (429 and 503 both genuinely hit today) crashed straight out of the graph. Fixed by catching `google.genai.errors.APIError` and adding a new `after_generate` router so generation failures retry through the same loop as validation/execution failures, instead of the fixed `generate → validate` edge assuming generation always succeeds.
+- `backend/api.py`'s `ChatResponse.columns` was typed `list[dict]` instead of `list[str]` — would fail Pydantic response validation on every call. Fixed.
+- Full detail in `PROJECT_PROGRESS.md`.
+
 ## 🐛 Bugs Fixed (Phase 8 — conversational memory)
 
 - `sql_generator.py`'s `generate_sql()` referenced a `history` parameter it never declared (`NameError`), and built `conversation_context` but never inserted it into the prompt. Both fixed.
@@ -162,23 +173,26 @@ flowchart TD
 - `tests/test_agent.py`: difficulty-tiered sanity/latency harness, saves timestamped CSV results
 - Conversational memory: `history` reducer, `record_history_node`, `SqliteSaver` checkpointer keyed by `thread_id`, history-aware `generate_sql()`
 - GitHub Actions QC discussed, deliberately deferred to Phase 14 (CI can't reach the local 117GB DB)
+- `backend/api.py`: FastAPI `/chat` + `/health`, CORS configured for the Vite dev origin, verified working end-to-end via curl (correct answer, HTTP 200)
+- `frontend/`: React + Vite chat widget, built by Claude per the user's request (not pseudocode-first, unlike the Python files) — UI verified rendering and accepting input via screenshots
+- Two real bugs found and fixed during end-to-end verification: the `DataFrame`/msgpack checkpointer crash (affected every successful query since memory was added) and missing error handling in `generate_node` for Gemini API failures
 
 ## 🔜 What's Left (immediate)
 
-- [ ] Run `agent.py`'s two-question smoke test once Gemini quota resets, to confirm follow-up questions actually resolve via history
-- [ ] Re-run `tests/test_agent.py`'s full suite cleanly (last run hit the free-tier daily quota partway through)
+- [ ] **User**: open `http://localhost:5173` in a normal browser tab and confirm a real question round-trips correctly — the one thing automated browser testing couldn't verify (its ~8.6s fetch timeout is shorter than Gemini's real response time)
+- [ ] Run `agent.py`'s two-question smoke test to confirm follow-up questions actually resolve via history — still not done, more likely to work now given today's fixes
+- [ ] Re-run `tests/test_agent.py`'s full suite cleanly — earlier runs were invalidated by quota exhaustion, then by the DataFrame bug
 - [ ] Decide: simple truncation vs. rolling summarization for long conversations — next memory design increment, deliberately not built yet
 - [ ] Decide how to handle genuinely heavy analytical queries (raise `statement_timeout` for this class, `CLUSTER posts` by tag, or a normalized tag lookup table) — deferred, not blocking
 - [ ] Consider enforcing a default `LIMIT` for un-bounded queries against huge tables
-- [ ] Phase 10 (FastAPI backend) to expose the agent over HTTP, then Phase 11 (frontend chat widget) — needs Phase 10 first
 
 ## 🔭 What's Left (whole project, at a glance)
 
 ```mermaid
 pie showData
     title Phases remaining vs done (14 total)
-    "Done / near-done" : 6
-    "Not started" : 8
+    "Done / near-done" : 8
+    "Not started" : 6
 ```
 
 ---

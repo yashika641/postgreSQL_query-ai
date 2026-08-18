@@ -2,19 +2,21 @@
 
 ## Overall Progress
 
-Completion: 43%
+Completion: 56%
 
 ## Current Phase
 
-Phase 7 — Agentic Workflow (LangGraph, ~30%, first working graph in `agent.py`)
+Phase 10/11 — FastAPI Backend + React Frontend (user explicitly chose to build these before finishing Phase 7/8 validation/testing — see Deferred)
 
 ## Current Task
 
-Phase 7/8 crossover: `agent.py` now has conversational memory — a `history` field (LangGraph reducer, accumulates across turns instead of overwriting), a `record_history_node` that runs only on the success path, a `SqliteSaver` checkpointer keyed by `thread_id` for per-conversation isolation, and `sql_generator.generate_sql()` now accepts `history` to resolve follow-up references ("now show me the same thing but for 2022"). Deliberately scoped to *just* the memory mechanism — no truncation/summarization for long conversations yet (explicit next step once a real conversation gets long enough to need it). `tests/test_agent.py` (the sanity/latency harness built alongside this) was also updated: each test case now gets its own `thread_id` so unrelated questions don't bleed history into each other.
+Backend (`backend/api.py`) and frontend (`frontend/`, React + Vite) now exist and were verified working end-to-end for real — not just smoke-tested in isolation. That verification surfaced a genuinely important bug that had been silently waiting in the memory design since it was added: `AgentState.result` held a raw `pandas.DataFrame`, but `SqliteSaver` (added for Phase 8 memory) persists the **entire state** after every node via msgpack, and `DataFrame` isn't msgpack-serializable — so **every single successful query would have crashed** once memory was wired in, not just edge cases. Confirmed via the actual traceback (`TypeError: Type is not msgpack serializable: DataFrame`, inside `SqliteSaver.put_writes`). Fixed by changing `AgentState.result` to a plain JSON-safe `{"columns": [...], "rows": [...]}` dict instead of a DataFrame — `execute_node`, `record_history_node`, `run_question()` (reconstructs a `DataFrame` before returning, to preserve its documented return type for CLI/test callers), `backend/api.py`, and `tests/test_agent.py` all updated to match.
 
-Both `agent.py` and `tests/test_agent.py` were hand-written by the user from pseudocode and needed real bug fixes before they'd run (see Bugs Fixed) — this is now a recurring, expected part of the workflow, not a one-off. One API-level finding worth keeping in mind for later: `SqliteSaver.from_conn_string()` is a context-manager factory (only yields a usable saver inside `with`), which doesn't work for a module-level `app` that other files import — fixed by constructing `SqliteSaver` directly from a raw `sqlite3.connect(...)` connection instead.
+Also found and fixed during the same verification pass: `generate_node` had no error handling around the Gemini call itself (only `validate_node`/`execute_node` had try/except for their own failure modes) — a transient API error (429 rate limit, 503 overload, both genuinely observed today) crashed straight out of the graph uncaught, past `api.py`'s own missing error handling, surfacing as a bare unhelpful 500. Fixed by catching `google.genai.errors.APIError` in `generate_node` and adding a proper `after_generate` conditional router (mirroring `after_validate`/`after_execute`) so a generation failure retries through the same attempt-counted loop instead of crashing.
 
-Earlier milestone (now superseded by the above): `agent.py` was first stood up as a faithful LangGraph port of `executor.py`'s retry loop, smoke-tested successfully ("how many questions were posted in 2025?" → 0). The full `test_agent.py` 9-question run that followed hit the Gemini free-tier daily quota (20 requests/day) partway through, so only the `easy` tier reflects real agent behavior from that run — the rest is quota exhaustion, not signal. Deeper review of that run is still deferred, not resolved.
+End-to-end proof: `curl -X POST http://localhost:8000/chat -d '{"question":"How many questions were posted in 2023?"}'` → HTTP 200, correct answer (993,601), in 43.6s (real Gemini latency, not a hang). The React chat widget renders and accepts input correctly (verified via screenshots), but the actual browser→backend fetch could not be verified end-to-end through browser automation — the automated test tab enforces an ~8.6s fetch timeout, well under Gemini's real ~15-45s response time, and this is confirmed to be a constraint of the automation tooling itself (a plain `fetch()` to `/health` succeeds instantly; only the long-running `/chat` call is affected). A normal (non-automated) browser tab has no such limit. **User needs to verify the full browser flow themselves** — both dev servers are left running (`localhost:5173` frontend, `localhost:8000` backend).
+
+Phase 7/8 (agentic workflow + conversational memory) mechanism is now more solid than before this session (the DataFrame bug fix and the generate-error-handling fix both apply there too — this wasn't backend-specific work, it fixed real defects in `agent.py` itself), but the deliberate validation steps from before (two-question memory smoke test proving follow-ups resolve correctly, full clean `tests/test_agent.py` run) are still not done — see Deferred.
 
 ## Phase Progress
 
@@ -25,11 +27,11 @@ Schema Intelligence      ██████████ 100%
 SQL Generation           ██████████ 100%
 Safety                    ██████████ 100%
 Execution / Retry         ███████░░░ 70%
-Agent                     █████░░░░░ 50%
-Memory                    ██░░░░░░░░ 20%
+Agent                     ██████░░░░ 60%
+Memory                    ████░░░░░░ 40%
 Visualization             ░░░░░░░░░░ 0%
-API                       ░░░░░░░░░░ 0%
-Frontend                  ░░░░░░░░░░ 0%
+API                       ██████░░░░ 60%
+Frontend                  █████░░░░░ 50%
 Evaluation                ░░░░░░░░░░ 0%
 Observability             ░░░░░░░░░░ 0%
 Deployment                ░░░░░░░░░░ 0%
@@ -57,19 +59,25 @@ Deployment                ░░░░░░░░░░ 0%
 - `tests/test_agent.py`: sanity/latency test harness — runs a difficulty-tiered question set through `app.invoke()` directly (not `run_question()`, to get full state incl. `attempts`), times each with `time.perf_counter()`, saves results to a timestamped CSV
 - `agent.py` + `sql_generator.py`: conversational memory — `history` reducer field, `record_history_node`, `SqliteSaver` checkpointer keyed by `thread_id`, `generate_sql()` now prompt-injects prior turns
 - GitHub Actions QC discussed and deliberately deferred to Phase 14 (see Deferred section) — CI runners can't reach the local 117GB DB
+- `backend/api.py`: FastAPI app, `/chat` (wraps `agent.app.invoke()` directly to expose the generated SQL alongside results, not just via `run_question()`) and `/health`, CORS configured for the Vite dev origin
+- `frontend/`: React + Vite chat widget (`ChatWidget.jsx`, `ResultTable.jsx`, `api.js`, styling) — built end-to-end by Claude per the user's explicit request ("not interested in frontend"), not pseudocode-first like the Python files
+- Found + fixed a real bug present since memory was added: `AgentState.result` (a raw `DataFrame`) isn't msgpack-serializable, so `SqliteSaver` crashed on every successful query once persistence was in the picture — changed `result` to a JSON-safe `{"columns", "rows"}` dict across `agent.py`, `backend/api.py`, `tests/test_agent.py`
+- Found + fixed a second real bug: `generate_node` had no error handling for the Gemini call itself — added `after_generate` conditional routing so API errors retry like any other node failure instead of crashing the graph
+- End-to-end verified via curl: NL question → Gemini → safety → Postgres → checkpointed state → HTTP JSON response, correct answer, no crash
 
 ## In Progress
 
-- Phase 7/8 (Agentic Workflow + Memory): core mechanism is in and smoke-tests import cleanly; not yet run against real questions to confirm follow-ups actually resolve correctly (blocked short-term by Gemini free-tier quota exhaustion from the last full test run).
+- Phase 10/11 (Backend + Frontend): backend verified working end-to-end for real (curl). Frontend UI verified rendering/accepting input, but the actual browser→backend chat call is unverified — browser-automation tooling's ~8.6s fetch timeout is shorter than Gemini's real response time, so this specific check needs the user to do it themselves in a normal tab. Both dev servers left running (`localhost:5173`, `localhost:8000`).
 
 ## Next
 
-1. Run `agent.py`'s smoke test (two questions, same `thread_id`: "...2023?" then "now show me the same thing but for 2022") once Gemini quota resets, to confirm the second question actually resolves "the same thing" via history rather than failing or hallucinating an unrelated query.
-2. Re-run `tests/test_agent.py`'s full 9-question suite cleanly (previous run hit the 20-req/day free-tier quota partway through) — review real success/failure/latency per difficulty tier this time.
-3. Decide: simple truncation (`history[-N:]`) vs. rolling summarization node for keeping long conversations within a reasonable prompt size — deliberately not built yet, this is the explicit next design increment for memory.
-4. Decide how to handle genuinely heavy analytical queries like the python-join test (deferred, not blocking): raising `statement_timeout` for this query class, `CLUSTER posts` on the trigram index (one-time, static dataset) to co-locate same-tag rows, or a normalized tag lookup table (unnest `tags` — the "correct" fix for substring tag search at scale).
-5. Consider enforcing a default `LIMIT` in `sql_safety.py` (or a dedicated step) for queries without one, so a broad question against `posts` can't pull an enormous result set into memory.
-6. Looking ahead (not started): Phase 10 (FastAPI backend) to expose `run_question()`/`thread_id` over HTTP, then Phase 11 (frontend chat widget) — needs Phase 10 first, since a widget needs something to call.
+1. **User**: open `http://localhost:5173` in a normal browser tab and confirm a real question round-trips correctly through the actual chat widget (this is the one thing automation couldn't verify).
+2. Run `agent.py`'s two-question memory smoke test (same `thread_id`: "...2023?" then "now show me the same thing but for 2022") to confirm follow-ups actually resolve via history — still not done, now more likely to actually work given today's two bug fixes, but not yet proven.
+3. Re-run `tests/test_agent.py`'s full 9-question suite cleanly — previous runs were invalidated first by Gemini quota exhaustion, then by the DataFrame serialization bug (which would have failed every successful case anyway). This will be the first real signal on success/failure/latency per difficulty tier.
+4. Decide: simple truncation (`history[-N:]`) vs. rolling summarization node for keeping long conversations within a reasonable prompt size — still not built.
+5. Decide how to handle genuinely heavy analytical queries like the python-join test (deferred, not blocking): raising `statement_timeout` for this query class, `CLUSTER posts` on the trigram index, or a normalized tag lookup table.
+6. Consider enforcing a default `LIMIT` in `sql_safety.py` for queries without one.
+7. `frontend/App.jsx`'s shell is minimal (just renders `ChatWidget`) — fine as-is, but any visual polish is the user's call since they've opted out of frontend work.
 
 ## Blockers
 
@@ -78,6 +86,13 @@ Deployment                ░░░░░░░░░░ 0%
 ## Deferred (revisit at Phase 14 — Deployment)
 
 - GitHub Actions QC for `tests/test_agent.py`: blocked by the fact that CI runners can't reach the local 117GB Postgres DB. Discussed three options (small seeded Postgres service container in CI / self-hosted runner / no-DB lightweight checks only) — leaning toward the seeded-container approach since it would have caught most of today's bugs, but explicitly deferred until closer to deployment rather than decided now.
+
+## Bugs Fixed (Phase 10/11 — backend + frontend verification)
+
+- `AgentState.result` was a raw `pandas.DataFrame`. Once `SqliteSaver` (Phase 8) was compiled into the graph, it persists the *entire* state after every node via msgpack serialization — and `DataFrame` has no msgpack representation. This meant **every successful query would crash**, not an edge case — confirmed via the actual traceback (`TypeError: Type is not msgpack serializable: DataFrame`, raised from `SqliteSaver.put_writes` → `ormsgpack.packb`). This bug existed from the moment memory was added but was never triggered until this session's real end-to-end test, because `tests/test_agent.py` calls `app.invoke()` directly and only checks `final_state["result"] is not None` / `len(...)` — it never actually let the checkpointer *finish* persisting a successful state in a way that surfaced the serialization step failing loudly (the earlier full-suite run hit quota exhaustion before any question could reach this code path). Fixed by changing `result` to `{"columns": [...], "rows": [...]}` (plain JSON-safe types) in `execute_node`, updating `record_history_node` (`len(state["result"]["rows"])`), `run_question()` (reconstructs a `DataFrame` from the dict before returning, preserving its documented return type), `backend/api.py`'s `/chat` handler, and `tests/test_agent.py`'s `rows_returned` computation.
+- `generate_node` had no error handling around the Gemini call — only `validate_node`/`execute_node` caught their own failure modes. A transient `google.genai.errors.APIError` (both a 429 rate-limit and a 503 "high demand" were genuinely observed today) crashed straight out of `app.invoke()` uncaught. `backend/api.py` didn't catch it either, so it surfaced as a bare unhelpful 500. Fixed by catching `APIError` in `generate_node` (returns it into `state["error"]` like any other node) and adding a new `after_generate` conditional router — mirroring `after_validate`/`after_execute` — so `generate → validate` is no longer a fixed edge; a generation failure now retries through the same attempt-counted loop instead of crashing.
+- `backend/api.py`'s `ChatResponse.columns` was typed `list[dict]` instead of `list[str]` — column names are strings, so this would fail Pydantic response validation on every successful call. Fixed.
+- Confirmed NOT a bug (checked, not assumed): `backend/api.py` living in a `backend/` subdirectory while `agent.py` stays in the project root works fine for imports, because `uvicorn backend.api:app` run from the project root puts the root on `sys.path` — unlike `tests/test_agent.py`'s situation, which needed an explicit `sys.path.insert`.
 
 ## Bugs Fixed (Phase 8 — conversational memory)
 

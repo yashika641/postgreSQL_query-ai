@@ -9,6 +9,7 @@ from database import engine
 from sql_safety import validate_sql, SQLSafetyError
 from langgraph.graph import StateGraph, END
 from sql_generator import generate_sql
+from google.genai.errors import APIError
 from typing import Annotated
 import operator
 import sqlite3
@@ -23,7 +24,11 @@ class AgentState(TypedDict):
     question:str
     sql: str|None
     validated_sql:str | None
-    result: DataFrame | None
+    result: dict | None    # {"columns": [...], "rows": [...]} -- JSON-serializable, NOT a DataFrame.
+                            # The SqliteSaver checkpointer persists the whole state after every
+                            # step via msgpack, and a raw DataFrame isn't serializable that way --
+                            # confirmed by a real "TypeError: Type is not msgpack serializable:
+                            # DataFrame" crash on every successful query once memory was added.
     error : str| None
     attempts:int
     history: Annotated[list,operator.add]
@@ -34,18 +39,24 @@ class AgentState(TypedDict):
 # it changed (LangGraph merges this into state — you don't mutate in place).
 
 def generate_node(state:AgentState)-> dict:
-    sql = generate_sql(state['question'], previous_error=state.get("error"), history=state.get("history",[]))
-    return{
-        'sql':sql,
-        'attempts': state['attempts']+1,
-        "error":None
-    }
+    try:
+        sql = generate_sql(state['question'], previous_error=state.get("error"), history=state.get("history",[]))
+        return{
+            'sql':sql,
+            'attempts': state['attempts']+1,
+            "error":None
+        }
+    except APIError as e:
+        return {
+            'attempts': state['attempts']+1,
+            'error': f"SQL generation failed: {e}",
+        }
 
 def record_history_node(state: AgentState)-> dict:
     turn = {
         "question": state["question"],
         "sql": state["validated_sql"],
-        "row_count": len(state["result"])}
+        "row_count": len(state["result"]["rows"])}
     return {"history":[turn]}
     
     
@@ -61,12 +72,22 @@ def execute_node(state: AgentState)-> dict:
     try:
         with engine.connect() as conn:
             df = pd.read_sql(text(state["validated_sql"]),conn)
-        return {'result':df,"error":None}
+        result = {"columns": list(df.columns), "rows": df.to_dict(orient="records")}
+        return {'result':result,"error":None}
 
     except DatabaseError as e:
         return {'error': f'database execution error:{e}'}
 
 #conditional_headers
+
+def after_generate(state: AgentState)-> str:
+    if state['error'] is None:
+        return "validate"
+
+    if state['attempts']>= MAX_ATTEMPTS:
+        return END
+    return "generate"
+
 
 def after_validate(state: AgentState)-> str:
     if state['error'] is None:
@@ -97,8 +118,12 @@ builder.add_edge("record_history", END)
 
 
 builder.set_entry_point("generate")
-builder.add_edge("generate","validate")
 
+builder.add_conditional_edges(
+    "generate",
+    after_generate,
+    {"validate":"validate","generate":"generate",END:END},
+)
 
 builder.add_conditional_edges(
     "validate",
@@ -139,7 +164,7 @@ def run_question(question: str, thread_id: str)-> DataFrame:
             f"failed to execute the question after {MAX_ATTEMPTS} attempts "
             f"last error:{final_state['error']}"
         )
-    return final_state['result']
+    return pd.DataFrame(final_state['result']['rows'], columns=final_state['result']['columns'])
 
 #------smoke test----------
 if __name__=="__main__":

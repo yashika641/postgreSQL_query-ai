@@ -1,8 +1,8 @@
 {
-  "overall_completion": 46,
-  "current_phase": 8,
-  "current_phase_name": "conversational_memory",
-  "last_updated": "2026-08-17T21:00:00",
+  "overall_completion": 56,
+  "current_phase": 10,
+  "current_phase_name": "backend_and_frontend",
+  "last_updated": "2026-08-18T14:00:00",
   "phases": {
     "database": 100,
     "python": 100,
@@ -10,23 +10,24 @@
     "sql_generation": 100,
     "safety": 100,
     "execution": 70,
-    "agent": 50,
-    "memory": 20,
+    "agent": 60,
+    "memory": 40,
     "visualization": 0,
-    "api": 0,
-    "frontend": 0,
+    "api": 60,
+    "frontend": 50,
     "evaluation": 0,
     "observability": 0,
     "deployment": 0
   },
   "metrics": {
-    "questions_tested": 2,
-    "successful_queries": 1,
+    "questions_tested": 3,
+    "successful_queries": 2,
     "failed_queries": 1,
-    "sql_accuracy": 50,
+    "sql_accuracy": 67,
     "answer_accuracy": 100,
     "average_latency_ms": null,
-    "average_retries": 1.5
+    "average_retries": 1,
+    "notes": "3rd test = curl end-to-end verification of backend /chat endpoint post-DataFrame-serialization-fix, correct answer, no crash. Earlier full 9-question suite runs are invalidated (quota exhaustion, then the DataFrame bug) and not counted here."
   },
   "database_status": {
     "postgres_version": "18",
