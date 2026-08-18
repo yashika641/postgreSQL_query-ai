@@ -2,13 +2,19 @@
 
 ## Overall Progress
 
-Completion: 60%
+Completion: 61%
 
 ## Current Phase
 
-Observability (Phase 13) and a first Evaluation run (Phase 12) are both done. Next: the Open Bugs debugging pass below, starting with the two cheapest confirmed fixes (#7, #8).
+Observability (Phase 13) and a first Evaluation run (Phase 12) are both done. Open Bugs #1, #2, #4, #7, #8 are now fixed (see Bugs Fixed below). #3 (conversational memory) is still blocked by the Gemini free-tier daily quota. Remaining: #3 (retry once quota resets), #5 (history truncation — bigger design decision), #6 (heavy analytical queries — biggest design decision, tackle last).
 
-## Current Task (session handoff — read this first)
+## Session Handoff (2026-08-19, start here)
+
+**Open Bug #3 (conversational memory) is still blocked** — retried after the calendar date rolled over to 2026-08-19, but `agent.py`'s smoke test hit `429 RESOURCE_EXHAUSTED` on the very first Gemini call. This means the free-tier quota does **not** reset at local midnight (IST). Working theory: it resets at UTC midnight (~5:30 AM IST), since the retry happened at ~00:17 IST — well before that. Not yet confirmed against Google's actual dashboard.
+
+**Next session starts with**: check the real reset time at `https://ai.dev/rate-limit` (or Google AI Studio's quota page) — the user was going to do this. Once quota is confirmed available, retry `python agent.py` (two sequential questions on the same `thread_id` — "How many questions were posted in 2023?" then "now show me the same thing but for 2022") and check whether the follow-up correctly reuses conversation context instead of just repeating the first query or erroring. That closes out #3. After that, move to #5 (history truncation/summarization design) and #6 (heavy analytical query timeouts), both bigger design decisions saved for last.
+
+## Current Task (older session handoff — read this first)
 
 **Evaluation ran — real baseline, but partially contaminated by a Gemini free-tier quota limit, not code bugs:**
 
@@ -40,6 +46,8 @@ Also found while investigating: `sql_generator.py` actually calls **`gemini-3.5-
 Still outstanding from before: `frontend/src/api.js`'s IPv4/IPv6 fix is **still uncommitted** — hasn't blocked anything since the backend's been run directly, but pick it up before frontend work resumes.
 
 **Next**: the Open Bugs debugging pass, starting with #7 (`votes` index) and #8 (`COUNT(*)` prompt nudge) since both are already confirmed and cheap, then working down the priority-ordered list. Test fixes in small batches (1-2 questions) to stay under the Gemini quota rather than re-running the full suite each time.
+
+**Debugging pass update (same day, continued)**: #7 and #8 fixed and verified (see Bugs Fixed). Checking the code for #1 and #2 found both already fixed — `generate_node` has a catch-all `except Exception` after `APIError`/`SQLGenerationError`, and `backend/api.py`'s `/chat` wraps `agent_app.invoke()` in a `try/except Exception` → 500. `sql_generator.generate_sql()` already raises `SQLGenerationError` on a `None` or empty-after-cleanup response. Attempted #3 (conversational memory smoke test in `agent.py`) to close it out — Q1 succeeded in 1 attempt (a good sign for #8's fix), but the follow-up question hit `429 RESOURCE_EXHAUSTED` on all 3 attempts (today's 20/day quota already used up by the eval run + this test's first call) — genuinely caught cleanly by #1's exception handling, not a crash, but inconclusive on whether memory itself works. Retry once quota resets. Implemented #4 instead (default `LIMIT` enforcement in `sql_safety.py` — pure code, no API calls needed): `validate_sql()` now injects `LIMIT 1000` on any statement without a top-level `LIMIT` already; verified via the file's own sanity checks (existing-LIMIT passthrough, stacked-query rejection, and unbounded-query injection all correct).
 
 ## Phase Progress
 
@@ -102,16 +110,13 @@ Deployment                ░░░░░░░░░░ 0%
 3. **Evaluation**: re-run `tests/test_agent.py`'s full 9-question suite cleanly now that the DataFrame and generate_node bugs are both fixed — previous runs were invalidated first by Gemini quota exhaustion, then by the DataFrame serialization bug (would have failed every successful case regardless). This will be the first real signal on success/failure/latency per difficulty tier. Feed real numbers into the AI Evaluation section below.
 4. **Then the debugging pass** — see Open Bugs below, already roughly priority-ordered.
 
-## Open Bugs (compiled for the next debugging pass — not yet fixed)
+## Open Bugs (compiled for the next debugging pass — remaining items)
 
-1. **`generate_node` only catches `google.genai.errors.APIError`** — a different Gemini SDK failure mode (e.g. a client-side timeout) may not subclass `APIError` and would still crash the graph uncaught. `backend/api.py`'s `/chat` also has no catch-all around `agent_app.invoke()` beyond the `RuntimeError`→422 path — any other uncaught exception surfaces as a bare, undiagnosable 500. **Highest priority**: most likely to produce another confusing unhandled-error bug, and observability work will make it easy to actually pin down once instrumented.
-2. **`sql_generator.generate_sql()` doesn't validate Gemini's output before returning it** — an empty string or a refusal instead of SQL would pass straight to `validate_sql()` with no earlier, clearer error.
-3. **Conversational memory has never been proven to actually work** — the two-question follow-up test ("now show me the same thing but for 2022") has never successfully run. The crash blocking it is fixed, but nobody has seen a follow-up resolve correctly yet.
-4. **No default `LIMIT` enforcement** in `sql_safety.py` — an unbounded broad question against `posts` can pull an enormous result set into memory with nothing stopping it. Small, contained, no dependencies on anything else.
+3. **Conversational memory has never been proven to actually work** — the two-question follow-up test ("now show me the same thing but for 2022") ran but the follow-up call hit `429 RESOURCE_EXHAUSTED` (today's quota already spent) before it could resolve. Not yet proven working. Retry once quota resets.
 5. **No truncation/summarization for long conversation history** — `generate_sql()` dumps the *entire* `history` into every prompt with no cap. Fine now, will grow prompt size/cost unboundedly on a long conversation. Bigger design decision (truncation vs. rolling summarization), tackle once everything else is solid.
 6. **Heavy analytical queries still time out** — the python-join question and the "average reputation per tag" stress question both hit the 30s `statement_timeout` on every attempt. Root-caused (not a missing-index problem, genuinely expensive at 59.5M-row scale). Three options already scoped: raise `statement_timeout` for this query class, `CLUSTER posts` by tag, or normalize `tags` into its own lookup table. Biggest design decision of the list, tackle last.
-7. **`votes` has no index covering `creationdate`** — found via the new observability logs: "how many upvotes were cast in 2022?" timed out on all 3 attempts (every attempt generated a `creationdate`-range-filtered `COUNT`). Same class of fix as `posts_posttypeid_creationdate_idx` — small, contained, high-confidence fix.
-8. **Gemini prefers `COUNT(*)` over `COUNT(id)`/`COUNT(1)` for simple counts**, which is slow enough on `posts`/`votes` to hit the 30s timeout on attempt 1 even when the retry recovers — a wasted 30s+ round-trip on otherwise-simple questions. Fix is prompt engineering (nudge `schema_prompt.py` to prefer `COUNT(id)` on large tables), not a code bug. Worth doing alongside item 7 since both showed up in the same observability session.
+
+Items 1, 2, 4, 7, 8 are fixed — see Bugs Fixed below. #3 is the next thing to close out once the Gemini quota resets; #5 and #6 are bigger design decisions to tackle once everything else is solid.
 
 ## Blockers
 
@@ -120,6 +125,17 @@ Deployment                ░░░░░░░░░░ 0%
 ## Deferred (revisit at Phase 14 — Deployment)
 
 - GitHub Actions QC for `tests/test_agent.py`: blocked by the fact that CI runners can't reach the local 117GB Postgres DB. Discussed three options (small seeded Postgres service container in CI / self-hosted runner / no-DB lightweight checks only) — leaning toward the seeded-container approach since it would have caught most of today's bugs, but explicitly deferred until closer to deployment rather than decided now.
+
+## Bugs Fixed (Open Bugs #1/#2/#4 — post-observability debugging pass, continued)
+
+- **#1**: `generate_node` only caught `google.genai.errors.APIError`, and `backend/api.py`'s `/chat` had no catch-all around `agent_app.invoke()` beyond the `RuntimeError`→422 path. Fixed: `generate_node` now has a trailing `except Exception` (after the more specific `APIError`/`SQLGenerationError` clauses, so their messages aren't swallowed) that routes back through the normal `after_generate` retry logic instead of crashing the graph; `/chat` wraps `agent_app.invoke()` in `try/except Exception` → clean `HTTPException(500, ...)`. Verified live: a real `429 RESOURCE_EXHAUSTED` during the #3 memory test was caught and retried through all 3 attempts without crashing.
+- **#2**: `sql_generator.generate_sql()` didn't validate Gemini's output before returning it. Fixed: raises `SQLGenerationError` if `response.text is None` (safety-filtered/refusal) or if the string is empty after markdown-fence cleanup, before it ever reaches `validate_sql()`.
+- **#4**: No default `LIMIT` enforcement in `sql_safety.py` — an unbounded broad question against `posts`/`votes` could pull an enormous result set into memory. Fixed: `validate_sql()` now scans the statement's flattened tokens for a top-level `LIMIT` keyword; if absent, appends `LIMIT 1000` before returning. A no-op for aggregate queries (`COUNT` etc., always one row) and queries that already specify their own `LIMIT`. Verified via `sql_safety.py`'s own sanity checks (existing-LIMIT passthrough, stacked-query rejection, unbounded-query injection all correct).
+
+## Bugs Fixed (Open Bugs #7/#8 — post-observability debugging pass)
+
+- **#7**: `votes` (~236M rows) had no index covering `creationdate`, so a `votetypeid`+`creationdate`-filtered query ("how many upvotes were cast in 2022?") forced a full scan and timed out on all 3 self-correction attempts. Fixed with `votes_votetypeid_creationdate_idx` (already drafted in `sql/add_indexes.sql`, same equality-leads/range-follows column order as `posts_posttypeid_creationdate_idx`) — run by the user as superuser via `psql -U postgres -d postgresql_query_ai -f sql/add_indexes.sql`. Verified live: `pg_index.indisvalid = t` and `pg_stat_user_tables.last_analyze` populated for `votes`.
+- **#8**: Gemini generated `COUNT(*)` more often than `COUNT(id)`/`COUNT(1)` for simple counts, slow enough on `posts`/`votes` to hit the 30s `statement_timeout` on attempt 1 even though the retry loop recovered on attempt 2 — a wasted 30s+ round-trip on otherwise-simple questions. Fixed by adding a rule to `sql_generator.py`'s `SYSTEM_PROMPT` telling Gemini to prefer `COUNT(id)`/`COUNT(1)` over `COUNT(*)` on the two large tables. Not yet re-tested against a live question (small-batch retest still pending, see Current Task).
 
 ## Bugs Fixed (Phase 10/11 — backend + frontend verification)
 

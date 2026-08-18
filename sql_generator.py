@@ -23,8 +23,14 @@ Rules:
 - FK relationships shown as comments are NOT enforced by the database
   (orphaned references exist) - prefer LEFT JOIN over INNER JOIN where a
   match isn't guaranteed.
+- When counting rows, use COUNT(id) or COUNT(1), never COUNT(*). posts
+  (~59.5M rows) and votes (~236M rows) are large enough that COUNT(*)
+  risks hitting the query's statement timeout.
 """.strip()
 
+class SQLGenerationError(Exception):
+    '''raised when gemini's response isnt usable sql at all
+    -- (empty response , safety- filtered, or effectively refusal)'''
 
 def generate_sql(question: str, previous_error: str | None = None, history: list | None = None) -> str:
     schema_text = render_schema_ddl(get_schema())
@@ -52,11 +58,18 @@ def generate_sql(question: str, previous_error: str | None = None, history: list
             system_instruction=SYSTEM_PROMPT,
         ),
     )
+    if response.text is None:
+        raise SQLGenerationError('Gemini returned no text (possibly blocked by safety filters)')
 
     sql = response.text.strip()
     if sql.startswith("```"):
         sql = sql.strip("`").removeprefix("sql").strip()
+        
+    if not sql:
+        raise SQLGenerationError ('gemini returned a empty response after cleanup')
     return sql
+
+
 
 
 if __name__ == "__main__":

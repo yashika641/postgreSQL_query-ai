@@ -8,7 +8,7 @@ from pandas.errors import DatabaseError
 from database import engine
 from sql_safety import validate_sql, SQLSafetyError
 from langgraph.graph import StateGraph, END
-from sql_generator import generate_sql
+from sql_generator import generate_sql, SQLGenerationError
 from google.genai.errors import APIError
 from typing import Annotated
 import operator
@@ -53,6 +53,12 @@ def generate_node(state:AgentState)-> dict:
             'attempts': state['attempts']+1,
             'error': f"SQL generation failed: {e}",
         }
+    except SQLGenerationError as e:
+        return {
+            "attempts": state['attempts']+1,
+            "error": "sql generation failed (unexpectedly): " + str(e)
+            }
+            
     except Exception as e:
         '''-- NEW: catches whatever APIError doesn't (timeouts, network errors,
         -- other SDK-internal exceptions) so the graph retries through the
@@ -64,8 +70,7 @@ def generate_node(state:AgentState)-> dict:
             "attempts": state["attempts"] + 1,
             "error": "SQL generation failed (unexpected): " + str(e)
         }
-        
-        
+    
 
 @log_node("record_history")
 def record_history_node(state: AgentState)-> dict:

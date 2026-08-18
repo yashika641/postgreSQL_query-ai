@@ -2,7 +2,7 @@
 
 > Auto-narrated from `project_metrics.json` and `PROJECT_PROGRESS.md`. Update both whenever this file is regenerated.
 
-**Last updated:** 2026-08-18 · **Overall completion:** **61%** · **Current phase:** `Observability + first Evaluation done → Open Bugs debugging pass`
+**Last updated:** 2026-08-19 · **Overall completion:** **61%** · **Current phase:** `Open Bugs #1/#2/#4/#7/#8 fixed → #3 still blocked on quota → #5/#6 remain`
 
 ---
 
@@ -29,9 +29,18 @@
 │  Decision: work around the quota by testing in small batches   │
 │  going forward rather than upgrading billing.                  │
 │                                                                │
-│  Next: Open Bugs debugging pass, starting with #7 (votes       │
-│  index) and #8 (COUNT(*) prompt nudge) — both already          │
-│  confirmed and cheap.                                          │
+│  Open Bugs #7/#8 FIXED — votes index built + verified live,    │
+│  COUNT(*) prompt nudge added (Q1 succeeded in 1 attempt on     │
+│  retest). #1/#2/#4 also FIXED — generate_node + /chat now      │
+│  have catch-alls (verified live against a real 429), Gemini   │
+│  output validation already existed, sql_safety.py now injects │
+│  a default LIMIT 1000. #3 (conversational memory) attempted   │
+│  but inconclusive — retried again after the date rolled over  │
+│  to 8/19, but the first call still hit 429 at ~00:17 IST.      │
+│  Quota likely resets at UTC midnight (~5:30 AM IST), not       │
+│  local midnight — not yet confirmed against Google's real      │
+│  dashboard. Next: check https://ai.dev/rate-limit, retry #3,   │
+│  then #5 (history truncation), #6 (heavy query timeouts).      │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -130,6 +139,17 @@ Successes: "questions posted in 2023" (2 attempts, 105.8s — attempt 1's `COUNT
 
 *Full results: `eval_results_20260818_190634.csv`. Next: re-run the hard/stress tier once the two confirmed bugs (`votes` index, `COUNT(*)` prompt bias) are fixed, to get a real baseline unaffected by known issues.*
 
+## 🐛 Bugs Fixed (Open Bugs #1/#2/#4 — post-observability debugging pass, continued)
+
+- `generate_node` only caught `google.genai.errors.APIError`; `backend/api.py`'s `/chat` had no catch-all beyond the `RuntimeError`→422 path. Fixed: a trailing `except Exception` in `generate_node` routes any other failure back through the normal retry logic instead of crashing; `/chat` wraps `agent_app.invoke()` in `try/except Exception` → clean 500. Verified live — a real `429` during the #3 memory test was caught and retried cleanly, no crash.
+- `sql_generator.generate_sql()` didn't validate Gemini's output before returning it — already fixed: raises `SQLGenerationError` on a `None` or empty-after-cleanup response.
+- No default `LIMIT` enforcement in `sql_safety.py` — an unbounded question against `posts`/`votes` could pull an enormous result set into memory. Fixed: `validate_sql()` injects `LIMIT 1000` when no top-level `LIMIT` is present; no-ops on aggregate queries and queries with their own `LIMIT`. Verified via the file's own sanity checks.
+
+## 🐛 Bugs Fixed (Open Bugs #7/#8 — post-observability debugging pass)
+
+- `votes` (~236M rows) had no index covering `creationdate` — a `votetypeid`+`creationdate`-filtered `COUNT` timed out on all 3 self-correction attempts. Fixed with `votes_votetypeid_creationdate_idx` (`sql/add_indexes.sql`), run by the user as superuser and verified live (`indisvalid = t`, `ANALYZE votes` ran).
+- Gemini generated `COUNT(*)` more often than `COUNT(id)`/`COUNT(1)` on `posts`/`votes`, slow enough to hit the 30s `statement_timeout` on attempt 1 even though the retry usually recovered on attempt 2. Fixed by adding a rule to `sql_generator.py`'s `SYSTEM_PROMPT` telling Gemini to prefer `COUNT(id)`/`COUNT(1)`. Not yet retested against a live question.
+
 ## 🐛 Bugs Fixed (session handoff — real browser testing)
 
 - User tested in a real (non-automated) browser tab and hit "Failed to fetch" despite curl working against the same `/chat` endpoint. Root cause: `localhost` resolves to IPv6 (`::1`) on this machine (confirmed via `ping`), uvicorn only binds IPv4 (`127.0.0.1`, confirmed via its own log) — the frontend's `fetch()` was silently trying the wrong address. Fixed by hardcoding `frontend/src/api.js`'s `API_BASE` to `http://127.0.0.1:8000`. **Not yet committed** — first thing to do next session.
@@ -200,7 +220,10 @@ Successes: "questions posted in 2023" (2 attempts, 105.8s — attempt 1's `COUNT
 - [x] **Observability**: structured logging per graph node + per `/chat` request, Prometheus + Grafana with a live dashboard — done and verified
 - [x] **Evaluation (first pass)**: full 9-question suite run — 5/9 clean signal, 4/9 invalidated by Gemini's daily quota. Re-run the invalidated tier once quota resets and the two confirmed bugs below are fixed
 - [ ] Commit `frontend/src/api.js`'s IPv4/IPv6 fix, and get the user's confirmation that a real browser question now round-trips successfully (still pending, not currently blocking)
-- [ ] **Open Bugs debugging pass** (`PROJECT_PROGRESS.md`, 8 items, priority-ordered) — start with #7 (`votes.creationdate` index) and #8 (Gemini's `COUNT(*)` preference), both already confirmed and cheap; also includes confirming memory follow-ups actually resolve correctly, which still hasn't been proven
+- [x] **Open Bugs #7/#8**: `votes.creationdate` index and Gemini's `COUNT(*)` preference — both fixed and verified
+- [x] **Open Bugs #1/#2/#4**: `generate_node`/`/chat` error-handling gap, Gemini output validation, default `LIMIT` enforcement — all fixed and verified
+- [ ] **Open Bug #3**: prove conversational memory follow-ups actually resolve correctly — attempted, blocked by today's Gemini quota; retry once it resets
+- [ ] **Open Bugs #5/#6**: history truncation/summarization design, and heavy analytical query timeouts (`statement_timeout` / `CLUSTER` / tag normalization) — bigger design decisions, tackle once #3 is closed out
 - [ ] Decide: simple truncation vs. rolling summarization for long conversations — next memory design increment, deliberately not built yet
 - [ ] Decide how to handle genuinely heavy analytical queries (raise `statement_timeout` for this class, `CLUSTER posts` by tag, or a normalized tag lookup table) — deferred, not blocking
 - [ ] Consider enforcing a default `LIMIT` for un-bounded queries against huge tables

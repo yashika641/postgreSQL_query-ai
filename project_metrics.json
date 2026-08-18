@@ -2,7 +2,7 @@
   "overall_completion": 61,
   "current_phase": 6,
   "current_phase_name": "debugging_pass",
-  "last_updated": "2026-08-18T19:10:00",
+  "last_updated": "2026-08-19T00:17:00",
   "session_handoff": {
     "mvp_status": "functionally ready end-to-end (backend confirmed via curl; frontend fixed for an IPv4/IPv6 localhost mismatch but not yet re-confirmed by the user in-browser)",
     "uncommitted_changes": "frontend/src/api.js (API_BASE hardcoded to 127.0.0.1) -- still not committed, not currently blocking anything",
@@ -11,7 +11,10 @@
     "eval_status": "first full 9-question suite run complete (eval_results_20260818_190634.csv). Only Q1-4 and Q7 are clean signal; Q5,6,8,9 hit Gemini's 20-req/day free-tier quota mid-run and are excluded, not counted as real failures.",
     "model_name_note": "sql_generator.py calls gemini-3.5-flash, not gemini-2.5-flash as previously documented -- confirmed intentional by the user, docs corrected in PROJECT_PROGRESS.md and docs/DASHBOARD.md",
     "quota_workaround": "user's explicit decision: test in small batches (1-2 questions) going forward instead of full-suite runs, rather than upgrading to a paid API tier",
-    "next_session_order": ["Open Bugs debugging pass, starting with #7 (votes.creationdate index) and #8 (COUNT(*) prompt nudge) since both are already confirmed and cheap"],
+    "bugs_7_8_status": "both fixed: votes_votetypeid_creationdate_idx built and verified live (indisvalid=t, ANALYZE run); sql_generator.py SYSTEM_PROMPT now nudges COUNT(id)/COUNT(1) over COUNT(*) on posts/votes -- Q1 succeeded in 1 attempt on retest, a good sign though only one data point",
+    "bugs_1_2_4_status": "all fixed: generate_node has a catch-all except Exception (verified live -- caught a real 429 without crashing during the #3 memory test); sql_generator.generate_sql() already validated empty/None Gemini output; sql_safety.validate_sql() now injects LIMIT 1000 on any statement without a top-level LIMIT",
+    "bug_3_status": "still blocked -- retried on 2026-08-19 after the calendar date rolled over, but the very first Gemini call still hit 429 RESOURCE_EXHAUSTED at ~00:17 IST. Quota likely resets at UTC midnight (~5:30 AM IST), not local midnight -- not yet confirmed against Google's actual dashboard. User checking https://ai.dev/rate-limit next session.",
+    "next_session_order": ["Confirm real quota reset time via https://ai.dev/rate-limit, retry Open Bug #3 (agent.py's two-question memory smoke test) once available, then move to #5 (history truncation) and #6 (heavy analytical query timeouts) -- both bigger design decisions"],
     "reasoning": "user's explicit call: instrument for visibility before debugging blind, rather than the reverse"
   },
   "phases": {

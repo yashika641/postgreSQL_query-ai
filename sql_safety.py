@@ -5,6 +5,8 @@ FORBIDDEN_SQL_KEYWORDS = [
     "GRANT", "REVOKE", "CREATE", "COPY", "CALL", "EXECUTE",
     "MERGE", "VACUUM", "REINDEX"]
 
+DEFAULT_LIMIT = 1000
+
 class SQLSafetyError(Exception):
     """Custom exception for SQL safety violations."""
     pass
@@ -41,25 +43,47 @@ def validate_sql(sql: str) -> str:
     for token in stmt.flatten():
         if token.ttype in sqlparse.tokens.Keyword and token.value.upper() in FORBIDDEN_SQL_KEYWORDS:
             raise SQLSafetyError(f"Forbidden SQL keyword detected: {token.value}")
-        
-    return normalized_sql.strip()
+
+    result_sql = normalized_sql.strip()
+
+    # No default LIMIT enforcement previously -- an unbounded broad question
+    # against a huge table (posts: 59.5M rows, votes: 236M rows) could pull
+    # an enormous result set into memory. Only add one if the statement
+    # doesn't already have a top-level LIMIT; a harmless no-op for
+    # aggregate queries (COUNT etc.) that return one row regardless.
+    has_limit = any(
+        token.ttype is sqlparse.tokens.Keyword and token.value.upper() == "LIMIT"
+        for token in stmt.flatten()
+    )
+    if not has_limit:
+        result_sql = result_sql.rstrip(";").rstrip() + f" LIMIT {DEFAULT_LIMIT};"
+
+    return result_sql
 
 if __name__ == "__main__":
-    #sanity check both the pass and fail path 
-    
+    #sanity check the pass, fail, and default-LIMIT-injection paths
+
     good = 'SELECT * FROM posts WHERE posttypeid = 1 LIMIT 10;'
     bad = 'SELECT * FROM posts; DROP TABLE users;'
-    
-    print("Testing good SQL:")
+    unbounded = 'SELECT tags, COUNT(*) FROM posts GROUP BY tags;'
+
+    print("Testing good SQL (already has LIMIT):")
     try:
         validated_sql = validate_sql(good)
         print(f"Passed: {validated_sql}")
     except SQLSafetyError as e:
         print(f"Failed: {e}")
-    
+
     print("Testing bad SQL:")
     try:
         validated_sql = validate_sql(bad)
+        print(f"Passed: {validated_sql}")
+    except SQLSafetyError as e:
+        print(f"Failed: {e}")
+
+    print("Testing unbounded SQL (no LIMIT -- should get one injected):")
+    try:
+        validated_sql = validate_sql(unbounded)
         print(f"Passed: {validated_sql}")
     except SQLSafetyError as e:
         print(f"Failed: {e}")
