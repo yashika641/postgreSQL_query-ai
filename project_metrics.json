@@ -2,8 +2,9 @@
   "overall_completion": 85,
   "current_phase": 14,
   "current_phase_name": "deployment",
-  "last_updated": "2026-08-20T09:00:00",
+  "last_updated": "2026-08-20T09:30:00",
   "session_handoff": {
+    "readme_status": "Fully redesigned (2026-08-20) -- original was a generic template referencing a fictional file structure and listing already-built features as 'future work'. New README documents real architecture (Mermaid diagram matching agent.py's LangGraph nodes), real features, real repo layout, honest dataset-sourcing (verified official archive.org Stack Exchange Data Dump link via live web search, since the user didn't recall their exact source; listed candidate XML->Postgres conversion tools without falsely asserting which one was used), and a full two-path setup guide (Docker vs manual) including the pg_hba.conf step. New docs/demo.gif recorded live via browser automation against the running Docker stack. New .env.example (didn't exist before).",
     "mvp_status": "functionally ready end-to-end (backend confirmed via curl; frontend fixed for an IPv4/IPv6 localhost mismatch but not yet re-confirmed by the user in-browser)",
     "uncommitted_changes": "frontend/src/api.js (API_BASE hardcoded to 127.0.0.1) -- still not committed, not currently blocking anything",
     "observability_status": "implemented and verified live: structured JSON logs (logs/agent.log), Prometheus metrics (/metrics), Grafana dashboard 'Query AI - Observability' (uid query-ai-observability) confirmed rendering real data via browser check",

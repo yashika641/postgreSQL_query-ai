@@ -116,6 +116,20 @@ Once the user's `INSERT` completed (59,483,997 rows) and they finished through S
 
 **Not yet done, worth noting for next time**: no `README`/deployment doc yet explaining `docker compose up -d` as the way to run this project, and the `pg_hba.conf` change + reload requirement isn't documented anywhere a future setup would find it. `votes` partitioning remains available but unused. The Ollama fallback's `host.docker.internal` override hasn't been tested against an actual forced Gemini failure inside the container (same gap as the non-Docker version, per the earlier Ollama handoff).
 
+## Session Handoff (2026-08-20, continued — README redesigned, demo GIF recorded)
+
+The original `README.md` was a generic AI-generated template from project inception — referenced a fictional `app/`-based file structure, generic "customers"/"sales" example queries, and listed already-built features (RAG-schema retrieval, auto-charting) under "Future Improvements." Fully rewritten to match the actual repo.
+
+**Dataset source honesty**: the user couldn't recall exactly where their SQL-formatted dump came from. Rather than guess a URL, verified via live web search: the real, current official source is the [Stack Exchange Data Dump on archive.org](https://archive.org/details/stackexchange) (XML format, cc-by-sa 4.0). Since the user's dump was already SQL, it went through an XML→Postgres conversion step somewhere — searched for real, existing tools (`bersace/stackexchange-dump-to-postgres`, `pgtreats/stackoverflow_in_pg`, `sth/sodata`) and listed them as candidates in the README, explicitly noting none is confirmed as what was originally used — honest about the gap rather than asserting a specific tool with false confidence. Documented the resulting expected schema (7 tables) instead, since that's what actually matters for reproducibility (`schema.py` reflects whatever exists at runtime).
+
+**Demo GIF**: recorded live via the browser automation tools against the already-running Docker stack — a real question ("What are the top 5 tags by number of posts?") through the actual UI, showing the "Thinking..." state, the generated SQL (expanded), and the resulting chart + table. Saved as `docs/demo.gif`, embedded at the top of the README.
+
+**New files**: `.env.example` (didn't exist before — created to match the real env var names in `database.py`/`sql_generator.py`), `docs/demo.gif`.
+
+**README now documents, accurately**: all real features (self-correction retry, safety validation, conversational memory with rolling summarization, chart heuristics, Ollama fallback, observability), the real architecture (a Mermaid diagram matching `agent.py`'s actual LangGraph nodes), the real tech stack, the real repo layout, and complete two-path setup instructions (Docker Compose vs. manual) including the `pg_hba.conf` step that would otherwise silently block anyone else trying to reproduce the Docker path. Links out to `PROJECT_PROGRESS.md`/`docs/DASHBOARD.md` as the full development log — an intentional choice to show the real engineering process, not just a polished final state.
+
+**Not yet done**: the README's dataset-conversion tool list is unverified (named from search results, not personally tested against this schema) — worth a note in the repo if the user ever pins down which tool they actually used.
+
 ## Session Handoff (2026-08-19, start here)
 
 **Phase 9 — Visualization / Result Intelligence built end-to-end this session**, in its own `visualization/` package (mirroring `observalibilty/`'s folder pattern, per the user's request):

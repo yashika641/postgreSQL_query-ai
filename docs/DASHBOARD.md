@@ -129,6 +129,15 @@
 │                                                                │
 │  ALL THREE OF TODAY'S GOALS DONE: partitioning, backend/         │
 │  frontend verification, deployment.                             │
+│                                                                │
+│  README REDESIGNED + DEMO GIF ADDED: old README was a generic   │
+│  template (fictional file structure, features listed as         │
+│  "future work" that were already built). New one documents      │
+│  the real architecture, features, and a full two-path setup     │
+│  guide. Dataset source verified via live web search (official   │
+│  archive.org Stack Exchange Data Dump) rather than guessed,     │
+│  since the user didn't recall theirs. docs/demo.gif recorded    │
+│  live against the running Docker stack.                         │
 └──────────────────────────────────────────────────────────┘
 ```
 
