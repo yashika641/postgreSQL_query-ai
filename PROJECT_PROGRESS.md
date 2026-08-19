@@ -2,7 +2,7 @@
 
 ## Overall Progress
 
-Completion: 82%
+Completion: 85%
 
 ## Current Phase
 
@@ -53,6 +53,68 @@ Retested the actual originally-failing question ("top 5 users by reputation who 
 **Closing #6 as fixed**, using the same standard already applied elsewhere in this project (e.g. the `COUNT(*)`→`COUNT(id)` case, Q1 in the first eval run): a question that recovers within the retry budget counts as a pass, not a failure. Before this fix, this exact question failed on **all 3 attempts every time** (the original documented case); now it recovers in 2/3. Not literally "always fast on attempt 1" — `post_tags` makes the right query shape (`EXISTS`) fast, but a naive `JOIN`+`DISTINCT` over 71M rows can still be slow — but the self-correction loop reliably finds the fast shape on retry, which is the practical fix.
 
 **All 8 originally-documented Open Bugs (#1-#8) are now closed.** Only two things remain open, both explicitly deferred (not forgotten): full-table partitioning (Phase 14, needs more disk headroom) and confirming the new Ollama fallback engages during a real (not simulated) Gemini outage.
+
+## Session Handoff (2026-08-19, continued further still — partitioning runbooks written, disk situation improved)
+
+Free disk jumped from 87GB to a stable 122GB (checked twice) since the earlier disk-space finding — this changes the partitioning risk calculus. `votes` (18GB) was already safe; `posts` (68GB) is now reasonably safe too (~40-54GB margin after the copy, vs. the earlier razor-thin ~1-19GB margin at 83-87GB free).
+
+Wrote two interactive runbooks (not blind `psql -f` scripts, given the swap step's stakes):
+- `sql/partition_votes.sql` — RANGE partition by `creationdate`, yearly 2008-2024 + a `DEFAULT` catch-all, matching `votes`' actual confirmed date range (2008-07-31 to 2023-12-03 for `votetypeid=2`). Recreates `votes_votetypeid_creationdate_idx` on the partitioned parent (auto-propagates to all partitions).
+- `sql/partition_posts.sql` — same pattern, but `posts` has 8 indexes total (confirmed via `pg_indexes`: `owneruserid`, `parentid`, `posttypeid`, `(score, tags)`, `tags`, `title`, `(posttypeid, creationdate)`, plus the `pg_trgm` GIN index) — all recreated on the partitioned parent in Step 4, since missing even one would undercut the whole point (e.g. skipping the trgm index would silently regress any tag-`LIKE` query that isn't already using `post_tags`).
+- **Important technical wrinkle handled in both**: Postgres requires a partitioned table's PK to include the partition key column. Both tables' original PK is a bare `PRIMARY KEY(id)`, which isn't legal once partitioned by `creationdate` — both runbooks use a composite `PRIMARY KEY(id, creationdate)` instead (still effectively unique in practice).
+
+Sequencing: do `votes` fully (through Step 6, dropping `votes_old`) before starting `posts`, so the two migrations never need their headroom simultaneously. **Neither has been run yet** — both need superuser credentials Claude doesn't have, same as `add_indexes.sql`/`normalize_tags.sql`; user runs them interactively, checking output between steps.
+
+**Next**: user runs both partitioning runbooks; separately, Claude moving on to a backend+frontend browser verification pass (per user's stated priority order: partitioning → backend/frontend → deployment, all targeted for today).
+
+## Session Handoff (2026-08-19, continued further still — backend+frontend verified live, one real regression found+fixed)
+
+Started both servers (`uvicorn backend.api:app` on 127.0.0.1:8000, `npm run dev` frontend on localhost:5173) and drove the actual UI in a real Chrome tab (not curl, not direct `agent.py` calls) — first true browser test since the Phase 9 chart work.
+
+**Real regression found**: asked "What are the top 5 tags by number of posts?" (the same question verified fast during Phase 9's chart spot-check, before `post_tags` existed) — `execute` took **28.7s**, nearly hitting the 30s timeout. Root cause: the `SYSTEM_PROMPT` rule added for Bug #6 ("for tag-based filtering, JOIN post_tags") was too broad — Gemini applied it to this aggregate/ranking question too, generating `SELECT tag, COUNT(post_id) FROM post_tags GROUP BY tag ORDER BY post_count DESC LIMIT 5` — a full GROUP BY over all 71.3M rows of `post_tags`, when the pre-existing `tags` table already has a `count` column with the exact precomputed answer (confirmed: `SELECT tagname, count FROM tags ORDER BY count DESC LIMIT 5` returns the identical numbers instantly).
+
+**Fixed**: split the `SYSTEM_PROMPT` rule in two — one for filtering to a specific tag (still `JOIN post_tags`, e.g. "posts about python"), one for ranking/counting across all tags (use `tags.count`, e.g. "top 5 tags by post count"), with an explicit note that `post_tags` should only be used directly when the question needs something `tags` doesn't have (e.g. joining tag membership to another table, which is Bug #6's actual originally-fixed case).
+
+**Verified the fix live**: re-asked the identical question in a fresh conversation through the real UI. `execute` dropped from 28,757ms to **195.1ms** — confirmed via the backend log, not just visually. The chart's axis labels also changed from `tag`/`post_count` to `tagname`/`count`, visually confirming the `tags` table path was used this time. IPv4 fix in `frontend/src/api.js` also confirmed still working (network request correctly went to `127.0.0.1:8000`, not `localhost`) — the last known uncommitted frontend fix is functioning correctly.
+
+Both servers left running in the background for continued testing. Frontend/API phases (Phase 10/11) are functionally solid based on this pass — no other issues surfaced.
+
+**Next**: deployment (Phase 14), per user's stated plan for today.
+
+## Session Handoff (2026-08-19, continued further still — Phase 14 deployment, Docker Compose)
+
+Scoped with the user first: "deployment" means **Dockerize everything and run it locally**, not a live cloud host — the 117GB dataset is the reason (matches why GitHub Actions CI was already deferred: no cheap way to get a DB that size into most CI/cloud environments). Postgres itself stays as the existing native install (already has the data; no reason to duplicate 117GB into a Docker volume) — only the *application* layers get containerized.
+
+**Built**:
+- `Dockerfile.backend` (project root, build context = root, since `backend/api.py` imports `agent.py`/`sql_generator.py`/etc. from the root via plain imports, not package-relative ones — matches how it's already run locally: `uvicorn backend.api:app` from the root).
+- `frontend/Dockerfile` — multi-stage (`node:22-slim` build → `nginx:alpine` serve), `frontend/nginx.conf` for SPA routing.
+- `.dockerignore` (root) and `frontend/.dockerignore` — critically, `.env` is excluded from the build context (secrets come from `docker-compose.yml`'s `env_file` at runtime, never baked into the image); `agent_memory.sqlite`/`logs/` excluded too, since those come from volume mounts, not the image.
+- `docker-compose.yml` extended with `backend` and `frontend` services alongside the existing `prometheus`/`grafana`.
+
+**Two real cross-environment bugs found and fixed before they could bite** (things that work when running directly on the host but silently break inside a container, since "localhost" means something different in each context):
+1. **Ollama fallback** (`sql_generator.py`'s `OLLAMA_URL`) was hardcoded to `http://localhost:11434` — inside a container, `localhost` is the container itself, not the host machine running Ollama. Fixed by making it `os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")` (unchanged default for local/non-Docker runs), overridden to `http://host.docker.internal:11434/api/generate` in the `backend` service's `environment:` block.
+2. **Postgres connectivity**: `database.py`'s `DB_HOST` needs to be `host.docker.internal` from inside the container (to reach the native host Postgres), not whatever `.env` has for local runs. Same pattern: overridden via `docker-compose.yml`'s `environment:` block rather than editing `.env` itself (so the local direct-run workflow is untouched).
+3. **`docker/prometheus.yml` updated**: `backend` is now a Compose service in the same network as Prometheus, so it's scraped via the service name `backend:8000` directly through Compose's internal DNS, instead of routing through `host.docker.internal` (that mechanism still exists and still would have worked via port-publishing, but the service-name route is more direct now that they're in the same stack).
+
+**Blocker surfaced, needs the user's decision before the stack can actually connect to Postgres**: checked `pg_hba.conf` — `listen_addresses = '*'` is fine, but the *auth rules* only allow connections from `127.0.0.1/32` and `::1/128` (loopback only). A container reaching Postgres via `host.docker.internal` arrives from a different source IP and will be rejected as-is. This is Postgres *server security config*, not an app file, so Claude flagged it rather than just editing it — proposed adding one line: `host all all 172.16.0.0/12 scram-sha-256` (Docker Desktop's default bridge network range on Windows, still password-authenticated via scram-sha-256, not `trust`). **Not yet applied** — waiting on the user's go-ahead.
+
+**Also not yet done**: `docker compose build` hadn't been run yet when this handoff was written — Docker Desktop's engine wasn't running (CLI present, daemon down), started it and was waiting for it to come up. Build/run verification is the next concrete step once the engine's ready and the `pg_hba.conf` question is resolved.
+
+## Session Handoff (2026-08-20, continued — Docker stack live, posts partitioning completed in parallel, one real wrong-answer bug caught+fixed)
+
+User approved the `pg_hba.conf` change; Claude added the `172.16.0.0/12 scram-sha-256` rule but couldn't reload/restart Postgres from this shell (`pg_ctl reload` and `Restart-Service` both denied — no OS-level signal permission for either). User ran `SELECT pg_reload_conf();` themselves. Both Docker images (`backend`, `frontend`) built clean on the first try; `docker compose up -d` brought up all 4 containers (`backend`, `frontend`, `prometheus`, `grafana`) successfully. Stopped the locally-running dev servers first (`uvicorn`/`vite`) since they held the same ports the containers needed.
+
+**Real bug caught live, not hypothetical**: while the user was independently running `sql/partition_posts.sql` in another shell (in parallel, as planned), a `/chat` test through the new container returned `count: 0` for "How many questions were posted in 2023?" — silently wrong, not a crash. Root cause: `posts` partitioning was mid-flight (Steps 1-2 done, `posts_y2023` existed but empty, Step 3's `INSERT` hadn't landed data yet) — Gemini saw both `posts` (real data) and `posts_y2023` (empty) in the schema and picked the empty child table by name. Traced this live by checking DB state directly rather than guessing, confirmed against the user's own `psql` session status.
+
+Once the user's `INSERT` completed (59,483,997 rows) and they finished through Step 6 (dropped `posts_old`), retested the same question — now correctly returns 993,601. But **the underlying behavior (Gemini querying `posts_yXXXX` child partitions by name instead of the parent) is a latent risk, not just a migration-timing artifact**: confirmed via a cross-year question ("2022 and 2023 combined") that Gemini correctly uses the parent `posts` + a `creationdate` filter when the question spans years, but a single-year question can still resolve to querying the child table directly — which only gave the right answer this time because the partition happened to be fully loaded. Fixed with a new `SYSTEM_PROMPT` rule: always query `posts` with a `creationdate` filter, never a `posts_yXXXX` table directly, since partition pruning handles it automatically and bypassing it is what caused the wrong-`0` bug in the first place. Rebuilt the backend image and retested live: the single-year question now correctly generates `SELECT COUNT(id) FROM posts WHERE posttypeid = 1 AND creationdate >= '2023-01-01' AND creationdate < '2024-01-01'` (parent table, filtered) instead of `SELECT COUNT(id) FROM posts_y2023 WHERE posttypeid = 1` (child table, unfiltered) — same correct answer, but now via the safe path.
+
+`votes` was not partitioned (user only ran the `posts` runbook) — `sql/partition_votes.sql` remains available if wanted later, matches the plan (posts was reasonably safe given the improved disk headroom; votes was always safe but wasn't actually run this session).
+
+**Verified the rest of the stack**: frontend container returns HTTP 200; Prometheus is healthy and successfully scraping `backend:8000` via Compose's internal service-name DNS (`health: up`, confirmed via its `/api/v1/targets` API — the `docker/prometheus.yml` service-name change from the earlier handoff works correctly); Grafana responds (302 to its login page, normal). Did one final real browser test through the actual containerized frontend (not curl) — asked "How many questions were posted in 2023?", got the correct 993,601 via the full `browser -> nginx (frontend container) -> FastAPI (backend container) -> host.docker.internal -> native Postgres` path.
+
+**All three of today's stated goals are now done**: partitioning (posts partitioned and verified, votes runbook available but not run), backend/frontend verification (one real regression found+fixed), and deployment (`docker compose up -d` brings up the full stack — Postgres, backend, frontend, Prometheus, Grafana — with two real cross-environment bugs and one real wrong-answer bug caught and fixed along the way, not just a Dockerfile that happens to build).
+
+**Not yet done, worth noting for next time**: no `README`/deployment doc yet explaining `docker compose up -d` as the way to run this project, and the `pg_hba.conf` change + reload requirement isn't documented anywhere a future setup would find it. `votes` partitioning remains available but unused. The Ollama fallback's `host.docker.internal` override hasn't been tested against an actual forced Gemini failure inside the container (same gap as the non-Docker version, per the earlier Ollama handoff).
 
 ## Session Handoff (2026-08-19, start here)
 
@@ -116,11 +178,11 @@ Execution / Retry         █████████░ 90%
 Agent                     ██████░░░░ 60%
 Memory                    ██████████ 100%
 Visualization             ██████████ 100%
-API                       ██████░░░░ 60%
-Frontend                  █████░░░░░ 50%
+API                       ███████░░░ 70%
+Frontend                  ██████░░░░ 60%
 Evaluation                █████░░░░░ 50%
 Observability             █████████░ 90%
-Deployment                ░░░░░░░░░░ 0%
+Deployment                ███████░░░ 75%
 ```
 
 ## Completed
@@ -177,6 +239,11 @@ Deployment                ░░░░░░░░░░ 0%
 ## Deferred (revisit at Phase 14 — Deployment)
 
 - GitHub Actions QC for `tests/test_agent.py`: blocked by the fact that CI runners can't reach the local 117GB Postgres DB. Discussed three options (small seeded Postgres service container in CI / self-hosted runner / no-DB lightweight checks only) — leaning toward the seeded-container approach since it would have caught most of today's bugs, but explicitly deferred until closer to deployment rather than decided now.
+
+## Bugs Fixed (post-partitioning — closed 2026-08-20, silent wrong answer)
+
+- Not one of the original 8 Open Bugs — surfaced live during Docker deployment testing, right after `posts` was partitioned. `posts` is now a partitioned table with per-year children (`posts_y2008`...`posts_y2024`, `posts_default`). Gemini would sometimes query a `posts_yXXXX` child table directly by name instead of the parent `posts` with a `creationdate` filter — for single-year questions this happened to still work once the migration was fully complete, but it's the same behavior that produced a **silently wrong `count: 0`** answer while the migration was still mid-flight (child partition existed but was still empty). Confirmed via a cross-year question that multi-year queries already correctly used the parent + filter (safe), but single-year queries were still at risk of resolving to a direct child-table hit — not a one-off migration-timing artifact, a standing risk. Fixed with a new `SYSTEM_PROMPT` rule in `sql_generator.py`: always query `posts` with a `creationdate` filter, never a `posts_yXXXX` table directly. Rebuilt the backend Docker image and verified live: the same question that previously could resolve either way now consistently generates the parent-table + filter form.
+- This is the second silent-wrong-answer bug found in this project (see also: the DataFrame/msgpack crash was loud, but this and the mid-migration `0` were both quiet) — worth remembering that timeouts and crashes aren't the only failure mode to watch for; wrong-but-plausible-looking answers are the more dangerous case since nothing signals a problem to the user.
 
 ## Bugs Fixed (Open Bug #6 — closed 2026-08-19, post_tags normalization)
 

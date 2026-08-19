@@ -1,4 +1,43 @@
 services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Postgres itself is NOT containerized -- it's the existing native
+      # install with the 117GB dataset already loaded, no reason to
+      # duplicate that into a Docker volume. host.docker.internal reaches
+      # the host's Postgres from inside the container; this overrides
+      # .env's DB_HOST (normally 127.0.0.1/localhost for direct local
+      # runs) for the containerized case only. Requires the matching
+      # pg_hba.conf rule -- see PROJECT_PROGRESS.md's deployment section.
+      DB_HOST: host.docker.internal
+      # Same reasoning as DB_HOST: Ollama runs natively on the host (not
+      # in this compose stack), so "localhost" from inside the container
+      # would mean the container itself, not the host running Ollama.
+      OLLAMA_URL: http://host.docker.internal:11434/api/generate
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Persist the SqliteSaver checkpoint DB and structured logs outside
+      # the container, same files the local (non-Docker) run already uses.
+      - ./agent_memory.sqlite:/app/agent_memory.sqlite
+      - ./logs:/app/logs
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      # Host port matches backend/api.py's CORS allow_origins
+      # (http://localhost:5173) so no CORS config change is needed.
+      - "5173:80"
+    depends_on:
+      - backend
+
   prometheus:
     image: prom/prometheus:latest
     ports:

@@ -2,7 +2,7 @@
 
 > Auto-narrated from `project_metrics.json` and `PROJECT_PROGRESS.md`. Update both whenever this file is regenerated.
 
-**Last updated:** 2026-08-19 · **Overall completion:** **82%** · **Current phase:** `All 8 Open Bugs closed → Ollama fallback added → Phase 14 deployment next`
+**Last updated:** 2026-08-20 · **Overall completion:** **85%** · **Current phase:** `Deployment done (Docker Compose) → posts partitioned → all today's goals complete`
 
 ---
 
@@ -92,16 +92,50 @@
 │  validation of the resulting SQL) — not yet seen through a       │
 │  real quota exhaustion in the live graph.                       │
 │                                                                │
-│  Remaining, deliberately deferred (not open bugs): full-table   │
-│  partitioning (Phase 14, needs more disk), confirming Ollama    │
-│  fallback under a real outage.                                  │
+│  Disk space improved to a stable 122GB free — posts partition-  │
+│  ing (68GB) is now reasonably safe too, not just votes (18GB).  │
+│  Runbooks written: sql/partition_votes.sql, sql/partition_      │
+│  posts.sql — not yet run (needs superuser, interactive).        │
+│                                                                │
+│  Backend+frontend verified LIVE in a real browser. Found+fixed  │
+│  one real regression: the post_tags prompt nudge was too        │
+│  broad, causing "top 5 tags" to wrongly aggregate over 71M      │
+│  post_tags rows (28.7s) instead of using tags.count (195ms).    │
+│  Fixed by scoping the rule to filtering vs. ranking. Re-        │
+│  verified live — 195.1ms after the fix. IPv4 fix confirmed      │
+│  working in the real UI.                                        │
+│                                                                │
+│  POSTS PARTITIONED (2026-08-20): user ran the full runbook,     │
+│  posts is now a partitioned table, posts_old dropped, all 9     │
+│  indexes propagated correctly. Surfaced a real silent-wrong-    │
+│  answer bug: Gemini sometimes queried posts_yXXXX child         │
+│  partitions directly instead of the parent+filter, causing a    │
+│  genuinely wrong count:0 while the migration was mid-flight.    │
+│  Fixed with a SYSTEM_PROMPT rule forcing the safe parent-table  │
+│  path; verified live post-fix. votes was NOT partitioned        │
+│  (runbook available, unused).                                   │
+│                                                                │
+│  DEPLOYMENT DONE — Docker Compose, run locally (117GB dataset   │
+│  ruled out a live cloud host, same reasoning as the deferred    │
+│  CI). Postgres stays native; backend+frontend containerized     │
+│  alongside prometheus/grafana. Found+fixed 2 cross-environment  │
+│  bugs (Ollama fallback + DB_HOST both hardcoded "localhost",    │
+│  which means the container itself inside Docker) before they    │
+│  could bite. Needed a pg_hba.conf change for the container to   │
+│  reach native Postgres — Claude edited it, user reloaded it     │
+│  (no OS signal permission from Claude's shell). All 4            │
+│  containers verified live, including a real browser test        │
+│  through the containerized frontend end to end.                 │
+│                                                                │
+│  ALL THREE OF TODAY'S GOALS DONE: partitioning, backend/         │
+│  frontend verification, deployment.                             │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ## 🧭 Overall Completion
 
 ```
-[█████████████████████████████████░░░░░]  82%
+[███████████████████████████████████░░░]  85%
 ```
 
 ## 🪜 Phase-by-Phase Progress
@@ -117,11 +151,11 @@
 | 7 | Agentic Workflow (LangGraph) | 🟡 In Progress | `██████░░░░` 60% |
 | 8 | Conversational Memory | 🟢 Complete | `██████████` 100% |
 | 9 | Result Intelligence / Viz | 🟢 Complete | `██████████` 100% |
-| 10 | FastAPI Backend | 🟡 In Progress | `██████░░░░` 60% |
-| 11 | Frontend | 🟡 In Progress | `█████░░░░░` 50% |
+| 10 | FastAPI Backend | 🟢 Near-Complete | `███████░░░` 70% |
+| 11 | Frontend | 🟡 In Progress | `██████░░░░` 60% |
 | 12 | Evaluation | 🟡 In Progress | `█████░░░░░` 50% |
 | 13 | Observability | 🟢 Near-Complete | `█████████░` 90% |
-| 14 | Docker + Deployment | ⬜ Not Started | `░░░░░░░░░░` 0% |
+| 14 | Docker + Deployment | 🟢 Near-Complete | `███████░░░` 75% |
 
 ## 📈 Phase Completion (visual)
 
@@ -131,7 +165,7 @@ xychart-beta
     title "Phase Completion %"
     x-axis ["DB", "Python", "Schema", "SQL Gen", "Safety", "Exec", "Agent", "Memory", "Viz", "API", "Frontend", "Eval", "Observ.", "Deploy"]
     y-axis "Completion %" 0 --> 100
-    bar [100, 100, 100, 100, 100, 90, 60, 100, 100, 60, 50, 50, 90, 0]
+    bar [100, 100, 100, 100, 100, 90, 60, 100, 100, 70, 60, 50, 90, 75]
 ```
 
 ## 🗺️ Milestone Timeline
@@ -192,6 +226,10 @@ Successes: "questions posted in 2023" (2 attempts, 105.8s — attempt 1's `COUNT
 **Excluded (not real failures):** the hard/stress-tier questions (5, 6, 8, 9) returned `429 RESOURCE_EXHAUSTED` — Gemini's free tier caps at 20 requests/day/project/model, and this run's up-to-27 generate calls burned through it mid-suite. Re-test these once quota resets, in small batches.
 
 *Full results: `eval_results_20260818_190634.csv`. Next: re-run the hard/stress tier once the two confirmed bugs (`votes` index, `COUNT(*)` prompt bias) are fixed, to get a real baseline unaffected by known issues.*
+
+## 🐛 Bugs Fixed (post-partitioning — closed 2026-08-20, silent wrong answer)
+
+- Not one of the original 8 Open Bugs — surfaced live during Docker deployment testing right after `posts` was partitioned. Gemini would sometimes query a `posts_yXXXX` child partition directly instead of the parent `posts` + `creationdate` filter — genuinely produced a wrong `count: 0` while the migration was mid-flight (empty child, real data still in the old table). Confirmed the risk wasn't just a migration-timing fluke: a cross-year test question showed multi-year queries already safely used the parent+filter form, but single-year queries could still resolve to a direct child-table hit. Fixed with a `SYSTEM_PROMPT` rule forcing the safe path; rebuilt the Docker image and verified live. Second silent-wrong-answer bug in this project (vs. the louder DataFrame/msgpack crash) — a reminder that timeouts and crashes aren't the only failure mode worth watching for.
 
 ## 🐛 Bugs Fixed (Open Bug #3 — closed 2026-08-19, quota reset)
 
@@ -284,18 +322,21 @@ Successes: "questions posted in 2023" (2 attempts, 105.8s — attempt 1's `COUNT
 - [x] **Open Bugs #1/#2/#4**: `generate_node`/`/chat` error-handling gap, Gemini output validation, default `LIMIT` enforcement — all fixed and verified
 - [x] **Open Bug #3**: prove conversational memory follow-ups actually resolve correctly — closed, verified via persisted checkpoint state showing correct history-aware SQL regeneration
 - [x] **Phase 9 — Visualization**: `visualization/chart_builder.py` + `agent.py`'s `visualize` node + `/chat` response fields + `frontend/ChartView.jsx` — built and verified standalone, in-browser, and through a real Gemini-backed question
-- [ ] **Open Bugs #5/#6**: history truncation/summarization design, and heavy analytical query timeouts (`statement_timeout` / `CLUSTER` / tag normalization) — bigger design decisions, next up
-- [ ] Decide: simple truncation vs. rolling summarization for long conversations — next memory design increment, deliberately not built yet
-- [ ] Decide how to handle genuinely heavy analytical queries (raise `statement_timeout` for this class, `CLUSTER posts` by tag, or a normalized tag lookup table) — deferred, not blocking
+- [x] **Open Bugs #5/#6**: rolling summarization built; `post_tags` normalization + `SYSTEM_PROMPT` scoping fixed the tag-scan timeout — both closed
+- [x] **`posts` partitioning**: done, verified, one real bug (silent wrong answer) found and fixed along the way
+- [x] **Deployment (Phase 14)**: Docker Compose brings up the full stack locally (Postgres stays native); verified live end-to-end including a real browser test
+- [ ] `votes` partitioning — runbook available, not run (not currently needed)
+- [ ] No README/deployment doc yet explaining `docker compose up -d` or the `pg_hba.conf` requirement
+- [ ] Ollama fallback not yet tested against a real forced Gemini failure (only simulated so far, in and out of Docker)
 
 ## 🔭 What's Left (whole project, at a glance)
 
 ```mermaid
 pie showData
     title Phase status (14 total)
-    "Done / near-done (>=90%)" : 7
-    "In progress" : 6
-    "Not started" : 1
+    "Done / near-done (>=90%)" : 9
+    "In progress" : 5
+    "Not started" : 0
 ```
 
 ---

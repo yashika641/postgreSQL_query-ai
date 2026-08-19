@@ -1,0 +1,19 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# psycopg2-binary ships its own libpq, no extra system packages needed.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Everything the backend needs lives at the project root (agent.py,
+# sql_generator.py, schema.py, etc.) -- backend/api.py imports these via
+# plain `from agent import app`, not a package-relative import, so the
+# whole root needs to be on the image, matching how it's run locally
+# (`uvicorn backend.api:app` from the project root, not from inside
+# backend/).
+COPY . .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]

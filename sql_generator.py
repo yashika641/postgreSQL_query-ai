@@ -12,7 +12,7 @@ load_dotenv()
 
 import requests
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 OLLAMA_MODEL ="qwen3:0.6b"
 
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
@@ -32,12 +32,31 @@ Rules:
 - When counting rows, use COUNT(id) or COUNT(1), never COUNT(*). posts
   (~59.5M rows) and votes (~236M rows) are large enough that COUNT(*)
   risks hitting the query's statement timeout.
-- For tag-based filtering (e.g. "posts about python"), JOIN post_tags
-  (post_id, tag) instead of using posts.tags LIKE '%python%'. The LIKE
-  pattern forces a slow scan across a scattered text column even with a
-  trigram index; post_tags.tag is a plain indexed equality lookup and is
-  much faster. Example: JOIN post_tags ON post_tags.post_id = posts.id
-  AND post_tags.tag = 'python'.
+- `posts` is a partitioned table with per-year child tables named
+  posts_y2008, posts_y2009, ... posts_y2024, plus posts_default. ALWAYS
+  query `posts` itself with a creationdate filter (e.g. WHERE creationdate
+  >= '2023-01-01' AND creationdate < '2024-01-01') -- NEVER query a
+  posts_yXXXX table by name directly. Postgres prunes to the right
+  partition automatically when you filter on creationdate against the
+  parent; querying a child table directly skips that and silently
+  produces wrong or incomplete results for anything spanning more than
+  one partition.
+- For tag-based FILTERING to a specific tag (e.g. "posts about python",
+  "users who answered questions about python"), JOIN post_tags (post_id,
+  tag) instead of using posts.tags LIKE '%python%'. The LIKE pattern
+  forces a slow scan across a scattered text column even with a trigram
+  index; post_tags.tag is a plain indexed equality lookup and is much
+  faster. Example: JOIN post_tags ON post_tags.post_id = posts.id AND
+  post_tags.tag = 'python'.
+- For questions RANKING or COUNTING across ALL tags (e.g. "top 5 tags by
+  number of posts", "how many posts are tagged javascript"), use the
+  `tags` table's pre-computed `count` column instead of aggregating over
+  post_tags. post_tags has ~71M rows with one row per (post, tag) pair --
+  GROUP BY over all of it is a full-table aggregate and can approach the
+  statement timeout, whereas `tags.count` already holds the answer.
+  Example: SELECT tagname, count FROM tags ORDER BY count DESC LIMIT 5.
+  Only use post_tags directly when the question needs something `tags`
+  doesn't have, e.g. joining tag membership to another table's rows.
 """.strip()
 
 

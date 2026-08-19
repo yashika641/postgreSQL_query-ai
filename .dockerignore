@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.git/
+.env
+frontend/node_modules/
+frontend/dist/
+logs/
+agent_memory.sqlite
+agent_memory.sqlite-*
+eval_results_*.csv
+docs/
+tests/
+.pytest_cache/

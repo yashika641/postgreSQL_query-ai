@@ -1,8 +1,8 @@
 {
-  "overall_completion": 82,
-  "current_phase": 9,
-  "current_phase_name": "visualization",
-  "last_updated": "2026-08-19T20:10:00",
+  "overall_completion": 85,
+  "current_phase": 14,
+  "current_phase_name": "deployment",
+  "last_updated": "2026-08-20T09:00:00",
   "session_handoff": {
     "mvp_status": "functionally ready end-to-end (backend confirmed via curl; frontend fixed for an IPv4/IPv6 localhost mismatch but not yet re-confirmed by the user in-browser)",
     "uncommitted_changes": "frontend/src/api.js (API_BASE hardcoded to 127.0.0.1) -- still not committed, not currently blocking anything",
@@ -19,7 +19,11 @@
     "ollama_fallback_status": "Added (not from the original bug list, user request): generate_sql() now falls back to a local Ollama model (qwen3:0.6b, already pulled -- user chose this over pulling a stronger code-tuned model) when Gemini's API/quota fails, via new _generate_with_ollama() in sql_generator.py. Found + fixed one bug: OLLAMA_MODEL was typo'd 'qwen:0.6b' (missing the 3), would have 404'd silently. Verified in stages (Ollama call directly, generate_sql() with Gemini APIError monkeypatched, resulting SQL through sql_safety.validate_sql() -- all passed) but not yet observed through the full agent.py graph with a real forced failure.",
     "bug_6_status": "FIXED (closed 2026-08-19) -- user ran sql/normalize_tags.sql as superuser (post_tags: 71,327,941 rows, both indexes built, query_ai_agent confirmed can SELECT with no manual grant needed). Retested the actual originally-failing question live through agent.py with real Gemini calls: attempt 1 correctly used post_tags but as JOIN+DISTINCT and still timed out; attempt 2 regenerated as an EXISTS subquery and finished in 1.6s with the correct answer (Jon Skeet et al). Closed per the same standard used elsewhere in this project: recovering within the retry budget counts as fixed -- this question failed on all 3 attempts every time before this fix.",
     "all_bugs_status": "All 8 originally-documented Open Bugs (#1-#8) are now fixed and verified. Remaining work is deliberately deferred, not tracked as open bugs: full-table partitioning (Phase 14, disk headroom) and confirming the Ollama fallback under a real (non-simulated) Gemini outage.",
-    "next_session_order": ["Optionally: a full 6+ turn conversation smoke test through agent.py to confirm #5's summarization triggers correctly end-to-end (only summarize_turn() was tested standalone so far, to conserve quota). Watch for the '[fallback]' console print during any real Gemini quota exhaustion to confirm the Ollama fallback engages in practice. Otherwise, next major work is Phase 10/11 hardening (API/Frontend still at 60%/50%) or Phase 14 deployment planning."],
+    "next_session_order": ["Optionally: a full 6+ turn conversation smoke test through agent.py to confirm #5's summarization triggers correctly end-to-end (only summarize_turn() was tested standalone so far, to conserve quota). Watch for the '[fallback]' console print during any real Gemini quota exhaustion to confirm the Ollama fallback engages in practice. Otherwise, next major work is Phase 14 deployment (user's stated priority for today)."],
+    "backend_frontend_verification_status": "Verified live in a real browser (2026-08-19): both servers started (uvicorn 127.0.0.1:8000, vite 5173), asked a real chart-worthy question through the actual UI. Found + fixed one real regression: the post_tags SYSTEM_PROMPT nudge (from Bug #6's fix) was too broad, causing a 'top 5 tags' ranking question to wrongly use post_tags (28.7s GROUP BY over 71M rows) instead of the pre-existing tags.count column (195ms). Fixed by splitting the prompt rule into 'filter to one tag -> post_tags' vs 'rank/count across all tags -> tags.count'. Re-verified live: execute time dropped to 195.1ms. IPv4 fix in frontend/src/api.js confirmed working (request correctly hit 127.0.0.1:8000). Phase 10/11 functionally solid, no other issues found.",
+    "partitioning_status": "DONE for posts (2026-08-20): user ran sql/partition_posts.sql through all 6 steps -- posts is now a partitioned table (relkind='p'), posts_old dropped, all 9 indexes propagated correctly to child partitions, query_ai_agent read access confirmed working post-swap. votes was NOT partitioned (sql/partition_votes.sql remains available if wanted later). Surfaced a real silent-wrong-answer bug in the process (see bug_partition_pruning_status).",
+    "bug_partition_pruning_status": "FIXED (2026-08-20): Gemini would sometimes query posts_yXXXX child partitions directly by name instead of the parent posts+creationdate filter. This caused a genuinely wrong count:0 answer while posts partitioning was mid-flight (empty child partition existed alongside the real, populated posts). Confirmed via a cross-year test question that multi-year queries already safely used the parent+filter form, but single-year queries were still at risk. Fixed with a new SYSTEM_PROMPT rule (always query posts with a creationdate filter, never posts_yXXXX directly); rebuilt the Docker backend image and verified live.",
+    "deployment_status": "DONE (2026-08-20), scoped as Docker Compose locally, not a live cloud host (117GB dataset ruled that out, same reasoning as the deferred GitHub Actions CI). Built: Dockerfile.backend, frontend/Dockerfile + nginx.conf, .dockerignore files, docker-compose.yml extended with backend+frontend services alongside existing prometheus/grafana. Postgres stays native (not containerized -- already has the data). Found+fixed 2 cross-environment bugs before they could bite (Ollama fallback and DB_HOST both hardcoded 'localhost', which means the container itself, not the host -- both now env-var-overridable, defaulting correctly for non-Docker runs). Required a pg_hba.conf change (added 172.16.0.0/12 scram-sha-256 for Docker's network range) -- Claude edited the file (user-owned, technically writable) but couldn't reload/restart Postgres itself (no OS signal permission); user ran SELECT pg_reload_conf() themselves. All 4 containers verified live: backend generates correct SQL and reaches native Postgres, frontend serves and works end-to-end in a real browser test, Prometheus scrapes backend via Compose service-name DNS (health:up), Grafana responds. Not yet done: no README/deployment doc, Ollama fallback not tested against a real forced failure inside the container.",
     "reasoning": "user's explicit call: instrument for visibility before debugging blind, rather than the reverse"
   },
   "phases": {
@@ -32,11 +36,11 @@
     "agent": 60,
     "memory": 100,
     "visualization": 100,
-    "api": 60,
-    "frontend": 50,
+    "api": 70,
+    "frontend": 60,
     "evaluation": 50,
     "observability": 90,
-    "deployment": 0
+    "deployment": 75
   },
   "metrics": {
     "questions_tested": 5,
