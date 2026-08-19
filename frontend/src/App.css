@@ -128,6 +128,20 @@
   word-break: break-word;
 }
 
+.chart-wrap {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.chart-wrap img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .result-table-wrap {
   overflow-x: auto;
 }

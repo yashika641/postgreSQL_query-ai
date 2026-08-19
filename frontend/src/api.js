@@ -19,5 +19,6 @@ export async function sendMessage(question, threadId) {
     throw new Error(detail);
   }
 
-  return response.json(); // { thread_id, sql, columns, rows, rows_count }
+  return response.json(); // { thread_id, sql, columns, rows, rows_count,
+                           //   chart_type, chart_x_column, chart_y_column, chart_image_base64 }
 }

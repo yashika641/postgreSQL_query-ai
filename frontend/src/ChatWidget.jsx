@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { sendMessage } from "./api";
 import ResultTable from "./ResultTable";
+import ChartView from "./ChartView";
 
 const THREAD_STORAGE_KEY = "query_ai_thread_id";
 
@@ -40,6 +41,10 @@ function ChatWidget() {
           columns: result.columns,
           rows: result.rows,
           rowsCount: result.rows_count,
+          chartType: result.chart_type,
+          chartXColumn: result.chart_x_column,
+          chartYColumn: result.chart_y_column,
+          chartImageBase64: result.chart_image_base64,
         },
       ]);
     } catch (err) {
@@ -106,6 +111,12 @@ function ChatWidget() {
                     <pre>{msg.sql}</pre>
                   </details>
                 )}
+                <ChartView
+                  chartType={msg.chartType}
+                  xColumn={msg.chartXColumn}
+                  yColumn={msg.chartYColumn}
+                  imageBase64={msg.chartImageBase64}
+                />
                 <ResultTable
                   columns={msg.columns}
                   rows={msg.rows}

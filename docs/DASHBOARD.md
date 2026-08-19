@@ -2,7 +2,7 @@
 
 > Auto-narrated from `project_metrics.json` and `PROJECT_PROGRESS.md`. Update both whenever this file is regenerated.
 
-**Last updated:** 2026-08-19 · **Overall completion:** **61%** · **Current phase:** `Open Bugs #1/#2/#4/#7/#8 fixed → #3 still blocked on quota → #5/#6 remain`
+**Last updated:** 2026-08-19 · **Overall completion:** **82%** · **Current phase:** `All 8 Open Bugs closed → Ollama fallback added → Phase 14 deployment next`
 
 ---
 
@@ -34,20 +34,74 @@
 │  retest). #1/#2/#4 also FIXED — generate_node + /chat now      │
 │  have catch-alls (verified live against a real 429), Gemini   │
 │  output validation already existed, sql_safety.py now injects │
-│  a default LIMIT 1000. #3 (conversational memory) attempted   │
-│  but inconclusive — retried again after the date rolled over  │
-│  to 8/19, but the first call still hit 429 at ~00:17 IST.      │
-│  Quota likely resets at UTC midnight (~5:30 AM IST), not       │
-│  local midnight — not yet confirmed against Google's real      │
-│  dashboard. Next: check https://ai.dev/rate-limit, retry #3,   │
-│  then #5 (history truncation), #6 (heavy query timeouts).      │
+│  a default LIMIT 1000.                                         │
+│                                                                │
+│  #3 (conversational memory) CLOSED — quota reset by ~18:40     │
+│  IST (consistent with the UTC-midnight theory). Ran the        │
+│  two-question smoke test for real, then read the persisted     │
+│  checkpoint state directly: the 2022 follow-up generated the   │
+│  same COUNT(id) query shape as the 2023 original with the      │
+│  year correctly re-derived from history — genuinely proven,    │
+│  not just "didn't crash".                                      │
+│                                                                │
+│  PHASE 9 — VISUALIZATION built end-to-end and now VERIFIED    │
+│  LIVE, in its own visualization/ package (mirrors              │
+│  observalibilty/'s folder pattern). chart_builder.py picks     │
+│  chart-worthy results via deterministic heuristics (no LLM     │
+│  call) and renders a matplotlib PNG; wired into agent.py as    │
+│  a new visualize node, backend/api.py's /chat response, and    │
+│  a new ChartView.jsx on the frontend. Spot-checked through a   │
+│  real Gemini-backed question ("top 5 tags by post count") —    │
+│  correctly produced a bar chart with a real PNG. Phase done.   │
+│                                                                │
+│  #5 CLOSED — user wrote the rolling-summarization pseudocode    │
+│  into sql_generator.py/agent.py; 3 real bugs found and fixed    │
+│  (a NameError typo, generate_sql() missing the param it was     │
+│  already being called with, a key typo silently breaking the   │
+│  rolling-forward counter). Verified live: two chained           │
+│  summarize_turn() calls produced a correct rolling summary.     │
+│                                                                │
+│  #6: user wanted RAG+sharding; real numbers ruled most of it    │
+│  out — schema prompt is only ~740 tokens (RAG wouldn't help,    │
+│  would cost quota), and full-table partitioning needs ~68-86GB  │
+│  headroom against only 83GB free (too risky, deferred to        │
+│  Phase 14, and wouldn't have fixed the actual failing query      │
+│  anyway — no date filter). Instead: built sql/normalize_tags.sql │
+│  (post_tags table — fixes the actual open tag-scan timeout,     │
+│  safe at ~7-8GB) — written but NOT YET RUN by the user.          │
+│                                                                │
+│  #6 CLOSED — user ran normalize_tags.sql (post_tags: 71.3M      │
+│  rows, both indexes built, query_ai_agent confirmed SELECT      │
+│  works with no manual grant). Retested the actual originally-   │
+│  failing question live: attempt 1 used post_tags correctly but  │
+│  as JOIN+DISTINCT and still timed out; attempt 2 regenerated    │
+│  as an EXISTS subquery and finished in 1.6s, correct answer.    │
+│  Recovers within budget now — before this fix it failed all 3   │
+│  attempts every time. Closed per the project's existing         │
+│  standard (recovery-within-budget = pass).                      │
+│                                                                │
+│  ALL 8 ORIGINALLY-DOCUMENTED OPEN BUGS (#1-#8) ARE NOW FIXED.   │
+│                                                                │
+│  NEW (user request, not from the bug list): local Ollama       │
+│  fallback added. generate_sql() now falls back to a local       │
+│  qwen3:0.6b model when Gemini's API/quota fails, so the        │
+│  pipeline keeps working during an outage instead of failing     │
+│  outright. One bug found+fixed (OLLAMA_MODEL typo'd without     │
+│  the "3", would've silently 404'd). Verified in stages (Ollama  │
+│  call, Gemini-failure routing via monkeypatch, safety           │
+│  validation of the resulting SQL) — not yet seen through a       │
+│  real quota exhaustion in the live graph.                       │
+│                                                                │
+│  Remaining, deliberately deferred (not open bugs): full-table   │
+│  partitioning (Phase 14, needs more disk), confirming Ollama    │
+│  fallback under a real outage.                                  │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ## 🧭 Overall Completion
 
 ```
-[████████████████████████░░░░░░░░░░░░░░]  61%
+[█████████████████████████████████░░░░░]  82%
 ```
 
 ## 🪜 Phase-by-Phase Progress
@@ -59,10 +113,10 @@
 | 3 | Schema Intelligence | 🟢 Complete | `██████████` 100% |
 | 4 | NL → SQL Generation | 🟢 Complete | `██████████` 100% |
 | 5 | SQL Safety & Validation | 🟢 Complete | `██████████` 100% |
-| 6 | Execution + Self-Correction | 🟡 In Progress | `███████░░░` 70% |
+| 6 | Execution + Self-Correction | 🟢 Near-Complete | `█████████░` 90% |
 | 7 | Agentic Workflow (LangGraph) | 🟡 In Progress | `██████░░░░` 60% |
-| 8 | Conversational Memory | 🟡 In Progress | `████░░░░░░` 40% |
-| 9 | Result Intelligence / Viz | ⬜ Not Started | `░░░░░░░░░░` 0% |
+| 8 | Conversational Memory | 🟢 Complete | `██████████` 100% |
+| 9 | Result Intelligence / Viz | 🟢 Complete | `██████████` 100% |
 | 10 | FastAPI Backend | 🟡 In Progress | `██████░░░░` 60% |
 | 11 | Frontend | 🟡 In Progress | `█████░░░░░` 50% |
 | 12 | Evaluation | 🟡 In Progress | `█████░░░░░` 50% |
@@ -77,7 +131,7 @@ xychart-beta
     title "Phase Completion %"
     x-axis ["DB", "Python", "Schema", "SQL Gen", "Safety", "Exec", "Agent", "Memory", "Viz", "API", "Frontend", "Eval", "Observ.", "Deploy"]
     y-axis "Completion %" 0 --> 100
-    bar [100, 100, 100, 100, 100, 70, 60, 40, 0, 60, 50, 50, 90, 0]
+    bar [100, 100, 100, 100, 100, 90, 60, 100, 100, 60, 50, 50, 90, 0]
 ```
 
 ## 🗺️ Milestone Timeline
@@ -138,6 +192,10 @@ Successes: "questions posted in 2023" (2 attempts, 105.8s — attempt 1's `COUNT
 **Excluded (not real failures):** the hard/stress-tier questions (5, 6, 8, 9) returned `429 RESOURCE_EXHAUSTED` — Gemini's free tier caps at 20 requests/day/project/model, and this run's up-to-27 generate calls burned through it mid-suite. Re-test these once quota resets, in small batches.
 
 *Full results: `eval_results_20260818_190634.csv`. Next: re-run the hard/stress tier once the two confirmed bugs (`votes` index, `COUNT(*)` prompt bias) are fixed, to get a real baseline unaffected by known issues.*
+
+## 🐛 Bugs Fixed (Open Bug #3 — closed 2026-08-19, quota reset)
+
+- Conversational memory had never been proven working end-to-end — earlier attempts kept hitting `429 RESOURCE_EXHAUSTED` before the follow-up question resolved. Quota reset by ~18:40 IST; ran the two-question smoke test for real and read the persisted checkpoint state directly (`app.get_state()`) rather than trusting printed output. The 2022 follow-up generated the same `COUNT(id)` query shape as the 2023 original, with the year correctly re-derived from injected history — genuinely proven, not a code fix (the code was already correct).
 
 ## 🐛 Bugs Fixed (Open Bugs #1/#2/#4 — post-observability debugging pass, continued)
 
@@ -214,6 +272,8 @@ Successes: "questions posted in 2023" (2 attempts, 105.8s — attempt 1's `COUNT
 - MVP declared functionally ready by the user — session ends here, next session pivots to Observability + Evaluation before further bug fixing
 - **Observability implemented and verified live**: `observalibilty/evaluation/metrics.py` (Prometheus `Counter`/`Histogram`s) + `observalibilty/evaluation/observability.py` (`log_node` decorator wrapping all 4 `agent.py` nodes, `log_chat_request` for `/chat` — each writes a structured JSON line to `logs/agent.log` *and* updates Prometheus in one call); `/metrics` mounted in `backend/api.py`; `docker-compose.yml` runs Prometheus + Grafana; a 7-panel Grafana dashboard pushed via API, confirmed rendering real scraped data via a live browser check
 - Two real findings surfaced immediately from the new instrumentation: `votes` has no `creationdate` index (unrecovered 3/3-attempt timeout), and Gemini prefers `COUNT(*)` over `COUNT(id)` on huge tables (recoverable on retry, but wastes a 30s+ attempt) — both logged as new Open Bugs items
+- Open Bugs #1, #2, #3, #4, #7, #8 all fixed and verified (see Bugs Fixed sections above)
+- **Phase 9 — Visualization built end-to-end and verified live**: `visualization/chart_builder.py` (new package, mirrors `observalibilty/`'s folder pattern) picks chart-worthy results via deterministic heuristics and renders a `matplotlib` PNG — no LLM call. Wired into `agent.py` as a new `visualize` node, `backend/api.py`'s `/chat` response, and a new `frontend/ChartView.jsx`. Verified standalone, in a live browser check with seeded data, and through a real Gemini-backed question ("top 5 tags by post count" → correct bar chart with a real PNG)
 
 ## 🔜 What's Left (immediate)
 
@@ -222,19 +282,20 @@ Successes: "questions posted in 2023" (2 attempts, 105.8s — attempt 1's `COUNT
 - [ ] Commit `frontend/src/api.js`'s IPv4/IPv6 fix, and get the user's confirmation that a real browser question now round-trips successfully (still pending, not currently blocking)
 - [x] **Open Bugs #7/#8**: `votes.creationdate` index and Gemini's `COUNT(*)` preference — both fixed and verified
 - [x] **Open Bugs #1/#2/#4**: `generate_node`/`/chat` error-handling gap, Gemini output validation, default `LIMIT` enforcement — all fixed and verified
-- [ ] **Open Bug #3**: prove conversational memory follow-ups actually resolve correctly — attempted, blocked by today's Gemini quota; retry once it resets
-- [ ] **Open Bugs #5/#6**: history truncation/summarization design, and heavy analytical query timeouts (`statement_timeout` / `CLUSTER` / tag normalization) — bigger design decisions, tackle once #3 is closed out
+- [x] **Open Bug #3**: prove conversational memory follow-ups actually resolve correctly — closed, verified via persisted checkpoint state showing correct history-aware SQL regeneration
+- [x] **Phase 9 — Visualization**: `visualization/chart_builder.py` + `agent.py`'s `visualize` node + `/chat` response fields + `frontend/ChartView.jsx` — built and verified standalone, in-browser, and through a real Gemini-backed question
+- [ ] **Open Bugs #5/#6**: history truncation/summarization design, and heavy analytical query timeouts (`statement_timeout` / `CLUSTER` / tag normalization) — bigger design decisions, next up
 - [ ] Decide: simple truncation vs. rolling summarization for long conversations — next memory design increment, deliberately not built yet
 - [ ] Decide how to handle genuinely heavy analytical queries (raise `statement_timeout` for this class, `CLUSTER posts` by tag, or a normalized tag lookup table) — deferred, not blocking
-- [ ] Consider enforcing a default `LIMIT` for un-bounded queries against huge tables
 
 ## 🔭 What's Left (whole project, at a glance)
 
 ```mermaid
 pie showData
-    title Phases remaining vs done (14 total)
-    "Done / near-done" : 8
-    "Not started" : 6
+    title Phase status (14 total)
+    "Done / near-done (>=90%)" : 7
+    "In progress" : 6
+    "Not started" : 1
 ```
 
 ---

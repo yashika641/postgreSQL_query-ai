@@ -3,11 +3,17 @@ import os
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
 from schema import get_schema
 from schema_prompt import render_schema_ddl
-
+MAX_VERBATIM_TURNS = 5
 load_dotenv()
+
+import requests
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL ="qwen3:0.6b"
 
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
@@ -26,17 +32,58 @@ Rules:
 - When counting rows, use COUNT(id) or COUNT(1), never COUNT(*). posts
   (~59.5M rows) and votes (~236M rows) are large enough that COUNT(*)
   risks hitting the query's statement timeout.
+- For tag-based filtering (e.g. "posts about python"), JOIN post_tags
+  (post_id, tag) instead of using posts.tags LIKE '%python%'. The LIKE
+  pattern forces a slow scan across a scattered text column even with a
+  trigram index; post_tags.tag is a plain indexed equality lookup and is
+  much faster. Example: JOIN post_tags ON post_tags.post_id = posts.id
+  AND post_tags.tag = 'python'.
 """.strip()
 
+
+def summarize_turn(existing_summary: str | None, turn: dict)-> str:
+    prompt= f'''
+    Existing summary so far (may be empty):{existing_summary or "(none yet)"}
+
+    new turn to fold in :
+    q: {turn['question']}
+    sql:{turn['sql']}
+    (returned {turn['row_count']}rows)
+
+    produce an updated , concise (2-4 sentences summary of the whole conversation , including this new turn . focus on what topics/ filters/time ranges the user has asked about and not exact sql)'''
+
+    response = client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
+
+    if response.text is None:
+        return existing_summary or ""
+    return response.text.strip()
+    
 class SQLGenerationError(Exception):
     '''raised when gemini's response isnt usable sql at all
     -- (empty response , safety- filtered, or effectively refusal)'''
 
-def generate_sql(question: str, previous_error: str | None = None, history: list | None = None) -> str:
+
+def _generate_with_ollama(user_message: str)-> str:
+    # local fall back for gemini api key quota 
+    resp = requests.post(OLLAMA_URL,json={
+        'model' : OLLAMA_MODEL,
+        "prompt" : f'{SYSTEM_PROMPT}\n\n{user_message}',
+        'stream': False,
+    }, timeout=60)
+    
+    resp.raise_for_status()
+    text = resp.json().get('response','')
+    if not text:
+        raise SQLGenerationError("ollama fallback returned no text")
+    return text.strip()
+
+def generate_sql(question: str, previous_error: str | None = None, history: list | None = None, history_summary: str | None = None) -> str:
     schema_text = render_schema_ddl(get_schema())
     conversation_context = ""
+    if history_summary:
+        conversation_context += f"Summary of earlier conversation:\n{history_summary}\n\n"
     if history:
-        conversation_context = "conversation so far :\n"
+        conversation_context += "conversation so far :\n"
         for turn in history:
             conversation_context += (
                 f"q: {turn['question']}\n"
@@ -50,23 +97,27 @@ def generate_sql(question: str, previous_error: str | None = None, history: list
             f"\n\nYour previous attempt failed with this error:\n{previous_error}\n"
             "Fix the query and try again."
         )
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+            ),
+        )
+        if response.text is None:
+            raise SQLGenerationError('Gemini returned no text (possibly blocked by safety filters)')
 
-    response = client.models.generate_content(
-        model="gemini-3.5-flash",
-        contents=user_message,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-        ),
-    )
-    if response.text is None:
-        raise SQLGenerationError('Gemini returned no text (possibly blocked by safety filters)')
-
-    sql = response.text.strip()
-    if sql.startswith("```"):
-        sql = sql.strip("`").removeprefix("sql").strip()
+        sql = response.text.strip()
         
+    except (APIError,SQLGenerationError) as e:
+        print( f'[fallback] Gemini failed ({e}) -- falling back to ollama ({OLLAMA_MODEL})')
+        sql = _generate_with_ollama(user_message)
+    if sql.startswith("```"):
+            sql = sql.strip("`").removeprefix("sql").strip()
+            
     if not sql:
-        raise SQLGenerationError ('gemini returned a empty response after cleanup')
+            raise SQLGenerationError ('gemini returned a empty response after cleanup')
     return sql
 
 

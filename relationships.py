@@ -16,4 +16,5 @@ RELATIONSHIPS = [
     {"from_table": "postlinks", "from_column": "relatedpostid", "to_table": "posts", "to_column": "id"},
     {"from_table": "tags", "from_column": "excerptpostid", "to_table": "posts", "to_column": "id"},
     {"from_table": "tags", "from_column": "wikipostid", "to_table": "posts", "to_column": "id"},
+    {"from_table": "post_tags", "from_column": "post_id", "to_table": "posts", "to_column": "id"},
 ]

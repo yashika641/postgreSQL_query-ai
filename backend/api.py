@@ -29,7 +29,11 @@ class chatresponse(BaseModel):
     columns : list[str]
     rows: list[dict]
     rows_count:int
-    
+    chart_type: str | None = None
+    chart_x_column: str | None = None
+    chart_y_column: str | None = None
+    chart_image_base64: str | None = None
+
 @app.post('/chat', response_model=chatresponse)
 def chat(request:chatrequest):
     start = time.perf_counter()
@@ -42,6 +46,7 @@ def chat(request:chatrequest):
         'result':None,
         'error': None,
         'attempts':0,
+        'chart': None,
     }
 
     config= {'configurable': {'thread_id':thread_id}}
@@ -62,6 +67,7 @@ def chat(request:chatrequest):
         raise HTTPException(status_code=422, detail=final_state['error'])
 
     result = final_state['result']
+    chart = final_state.get('chart')
 
     log_chat_request(request.question, thread_id, duration_ms,
                       final_state['attempts'], success=True)
@@ -71,7 +77,11 @@ def chat(request:chatrequest):
         sql = final_state['validated_sql'],
         columns= result['columns'],
         rows= result['rows'],
-        rows_count=len(result['rows'])
+        rows_count=len(result['rows']),
+        chart_type = chart['chart_type'] if chart else None,
+        chart_x_column = chart['x_column'] if chart else None,
+        chart_y_column = chart['y_column'] if chart else None,
+        chart_image_base64 = chart['image_base64'] if chart else None,
     )
     
 @app.get('/health')
